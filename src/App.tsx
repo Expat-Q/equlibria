@@ -68,7 +68,9 @@ function App() {
   const isDemoMode = IS_DEMO;
 
   const privy_id = user?.id || '';
-  const wallet = wallets.find(w => (w as any).walletClientType === 'privy' || w.address.startsWith('0x'));
+  const embeddedWallet = wallets.find(w => (w as any).walletClientType === 'privy');
+  const externalWallet = wallets.find(w => (w as any).walletClientType && (w as any).walletClientType !== 'privy');
+  const wallet = externalWallet || embeddedWallet || wallets.find(w => w.address?.startsWith('0x'));
   const address = wallet?.address ?? '';
   const chainIdMap: Record<string, number> = { ethereum: 1, base: 8453, arbitrum: 42161 };
 

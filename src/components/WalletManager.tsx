@@ -21,9 +21,9 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
   const [keySaved, setKeySaved] = useState(false);
   const [storedKey, setStoredKey] = useState(() => localStorage.getItem('equilibria_imported_pk') || '');
 
-  const starknetWallet = wallets.find(
-    w => (w as any).walletClientType === 'privy' || w.address.startsWith('0x')
-  );
+  const embeddedWallet = wallets.find(w => (w as any).walletClientType === 'privy');
+  const externalWallet = wallets.find(w => (w as any).walletClientType && (w as any).walletClientType !== 'privy');
+  const starknetWallet = externalWallet || embeddedWallet || wallets.find(w => w.address?.startsWith('0x'));
   const address = starknetWallet?.address ?? '';
   const shortAddress = address ? `${address.slice(0, 10)}...${address.slice(-6)}` : '—';
   const isPrivyEmbedded = (starknetWallet as any)?.walletClientType === 'privy';

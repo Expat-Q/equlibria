@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Icon } from './Icon';
 import type { SavingsPlan } from '../types';
 import { CATEGORIES, TOKEN_COLOR } from '../types';
-import { depositToPool, depositToTreasury, recordDeposit } from '../services/chainService';
-import { usePrivy } from '../hooks/privy';
+import { depositToPool, depositToTreasury } from '../services/chainService';
+import { useAuthFetch } from '../hooks/useAuthFetch';
+import { API_BASE } from '../services/api';
 
 interface Props {
   plan: SavingsPlan;
@@ -23,7 +24,7 @@ interface Props {
 type Status = 'idle' | 'quoting' | 'approving' | 'signing' | 'confirming' | 'success' | 'error';
 
 export function DepositModal({ plan, wallet, onClose, onDeposited }: Props) {
-  const { getAccessToken } = usePrivy();
+  const authFetch = useAuthFetch();
   const [amount, setAmount] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [txHash, setTxHash] = useState('');
@@ -72,8 +73,11 @@ export function DepositModal({ plan, wallet, onClose, onDeposited }: Props) {
 
         // Record the deposit on backend for points
         try {
-          const token = await getAccessToken();
-          await recordDeposit(plan.id, wallet?.address || '', num, result.txHash, result.status, token || undefined);
+          await authFetch(`${API_BASE}/api/vaults/${plan.id}/deposit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ depositorAddress: wallet?.address || '', amount: num, txHash: result.txHash, txStatus: result.status }),
+          });
         } catch { /* non-critical */ }
 
         const updatedPlan: SavingsPlan = {
@@ -106,8 +110,11 @@ export function DepositModal({ plan, wallet, onClose, onDeposited }: Props) {
 
         // Record the deposit on backend for points
         try {
-          const token = await getAccessToken();
-          await recordDeposit(plan.id, wallet?.address || '', num, result.txHash, undefined, token || undefined);
+          await authFetch(`${API_BASE}/api/vaults/${plan.id}/deposit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ depositorAddress: wallet?.address || '', amount: num, txHash: result.txHash }),
+          });
         } catch { /* non-critical */ }
 
         const updatedPlan: SavingsPlan = {
