@@ -185,16 +185,6 @@ function App() {
     loadRealBalances();
   }, [authenticated, address]);
 
-  const refreshWalletBalances = async () => {
-    if (!address) return;
-    try {
-      const balances = await getWalletBalances(address);
-      setWalletBalances(balances);
-    } catch (err) {
-      console.warn('Failed to refresh demo balances:', err);
-    }
-  };
-
 
   const startPolling = () => {
     // Poll for vault updates every 10 seconds
@@ -682,7 +672,6 @@ function App() {
                 wallet={wallet}
                 onBack={() => setSelectedPlan(null)}
                 onUpdatePlan={updatePlan}
-                walletBalances={walletBalances}
                 />
             ) : (
               <>

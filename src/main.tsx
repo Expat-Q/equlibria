@@ -25,7 +25,6 @@ function Root() {
         embeddedWallets: {
           ethereum: {
             createOnLogin: 'users-without-wallets',
-            requireUserPasswordOnCreate: false,
           },
         },
         defaultChain: base,
