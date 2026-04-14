@@ -1,0 +1,10 @@
+src/App.tsx(15,30): error TS1484: 'Notification' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+src/App.tsx(34,10): error TS6133: 'vaultsSynced' is declared but its value is never read.
+src/App.tsx(128,17): error TS6133: 'partnerAddr' is declared but its value is never read.
+src/App.tsx(268,9): error TS6133: 'openUserProfile' is declared but its value is never read.
+src/components/PrivateWallet.tsx(21,9): error TS6133: 'tokenColor' is declared but its value is never read.
+src/components/SharedVault.tsx(7,34): error TS1484: 'WithdrawalRequest' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+src/components/SharedVault.tsx(30,9): error TS6133: 'tokenColor' is declared but its value is never read.
+src/components/SharedVault.tsx(245,13): error TS6133: 'request' is declared but its value is never read.
+src/components/TourGuide.tsx(18,28): error TS2339: Property 'default' does not exist on type 'typeof import("C:/Users/HomePC/Downloads/starknet miniapp/node_modules/react-joyride/dist/index")'.
+src/components/YieldDashboard.tsx(4,22): error TS6133: 'TOKEN_COLOR' is declared but its value is never read.

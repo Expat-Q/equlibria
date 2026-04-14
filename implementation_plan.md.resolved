@@ -1,0 +1,48 @@
+# Backend & Smart Contract Architecture Plan (V2 Finalized)
+
+Based on your updated requirements, we are expanding the architecture to support Idle vs Yield allocations, Automated Recurring Deposits, and a dynamic multi-chain protocol selector.
+
+## Proposed Architecture Updates
+
+### 1. Unified Smart Contract: `SavingsVault.sol`
+Instead of forcefully depositing everything into yield, the vault will act as a programmable router.
+
+**Core Modifications:**
+- **Idle Vaulting (`isIdle = true`)**: The contract will natively hold the ERC20 (USDC, USDT, etc.) in a time-locked state. No external risks, 0% APY, purely for enforced savings discipline.
+- **Active Yield Routing (`isIdle = false`)**: If the user selects a yield strategy, the contract will utilize a dynamically injected `IYieldAdapter` to route funds into the selected pool (e.g., Aave, Compound, Radiant).
+- **Emergency Unlock Penalty:** A user can "break" an idle savings lock before the target date. If they do, they can withdraw their funds immediately but incur a **minimal penalty (e.g. 2%)** which is routed directly to the Equilibria protocol treasury to enforce discipline and generate revenue.
+
+### 2. Automated Deposits (Recurring Savings) & Revenue
+To enable "$5 weekly" automatic deductions without the user needing to sign a transaction every time:
+- **EIP-2612 Permits / Unlimited Approvals:** Users will grant the `SavingsVault` contract permission to pull tokens from their wallet.
+- **Keeper Network Execution:** A decentralized keeper (Chainlink Automation) triggers the deposit transaction every week.
+- **Cost & Revenue Mechanics:** When the keeper fetches the $5 logic, the contract pulls `$5.00` + `Network Gas Cost` + `Protocol Fee` from the user's wallet simultaneously. The `$5.00` goes to the vault, the gas reimburses the keeper, and the `Protocol Fee` stays in the `SavingsVault` treasury for the protocol admins to claim directly as revenue.
+
+### 3. Dynamic Multi-Chain Protocol Selection
+When opening the "Create Plan" modal on the frontend, users must explicitly configure their environment.
+
+**Architectural Flow:**
+1. **Source Chain Selection:** User selects (Base, Arbitrum, BNB, or Polygon).
+2. **Strategy Selection:** Based on the chosen chain, the backend queries the database for available protocols on that specific network.
+   - *Example: Base -> Aave V3, Compound V3*
+   - *Example: BNB -> Venus Protocol*
+   - *Example: Polygon -> Aave V3, Radiant*
+3. **Execution:** The frontend explicitly switches the user's wallet network to the selected chain, and executes the `createVault(chainParams, protocolAdapter, scheduleParams)` transaction locally.
+
+---
+
+## Detailed Tech Stack Map
+
+| Component | Technology | Responsibility |
+| :--- | :--- | :--- |
+| **Smart Contracts** | Foundry (Solidity) | Deploy `SavingsVaultTracker` + unique `Vault` clones on Arbitrum, Base, BNB, Polygon. |
+| **Auto-Depositer** | Chainlink Automation | Decentralized cron jobs triggering scheduled user deposits. |
+| **Backend API** | Node.js / Express | Central database (Prisma) tracking multi-chain TVL, keeping a catalog of active Yield Protocol addresses per-chain. |
+| **Price / API Data**| DeFiLlama API | Fetching live APY rates for all supported protocols across all 4 chains to display in the frontend UI. |
+
+---
+
+## Verification Plan
+1. Complete the Foundry contracts configuring `Gelato`/`Chainlink` automation for pulling funds + the protocol/gas fee structures.
+2. Draft a script to deploy mock protocol adapters on Arbitrum Sepolia/Base Sepolia to test real cross-chain execution.
+3. Update the frontend UI `CreatePlanModal` to include the new "Chain Selection", "Yield vs Idle", and "Recurring Frequency" dropdowns.

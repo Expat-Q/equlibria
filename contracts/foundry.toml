@@ -1,0 +1,20 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+solc_version = "0.8.20"
+
+[profile.default.optimizer]
+enabled = true
+runs = 200
+
+[fmt]
+line_length = 120
+tab_width = 4
+
+[rpc_endpoints]
+sepolia = "https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+base_sepolia = "https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+arbitrum_sepolia = "https://arbitrum-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}"

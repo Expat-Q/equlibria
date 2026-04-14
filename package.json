@@ -1,0 +1,50 @@
+{
+  "name": "equilibria-vault",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "playwright test",
+    "test:e2e": "playwright test",
+    "server": "tsx server/index.ts",
+    "server:dev": "tsx watch server/index.ts"
+  },
+  "dependencies": {
+    "@privy-io/node": "^0.14.0",
+    "@privy-io/react-auth": "^3.21.2",
+    "buffer": "^6.0.3",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-floater": "^0.10.1",
+    "react-joyride": "^3.0.2",
+    "viem": "^2.47.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "express": "^5.2.1",
+    "globals": "^17.4.0",
+    "mongoose": "^9.3.3",
+    "playwright": "^1.59.1",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.0",
+    "vite": "^8.0.1"
+  }
+}
