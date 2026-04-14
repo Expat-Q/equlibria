@@ -21,7 +21,7 @@ import { CurrencyProvider } from './context/CurrencyContext';
 import { ReferralsPage } from './components/ReferralsPage';
 import { LeaderboardPage } from './components/LeaderboardPage';
 import type { ChainName, SavingsPlan } from './types';
-import { applyDemoTransaction, getWalletBalances, type WalletBalance } from './services/chainService';
+import { getWalletBalances, type WalletBalance } from './services/chainService';
 import { useAuthFetch } from './hooks/useAuthFetch';
 import { API_BASE } from './services/api';
 
@@ -195,69 +195,6 @@ function App() {
     }
   };
 
-  const handleDemoTransaction = async (payload: {
-    type: 'send' | 'deposit' | 'swap' | 'withdraw' | 'receive' | 'topup' | 'plan_create' | 'join';
-    chain: string;
-    token: string;
-    amount: number;
-    tokenOut?: string | null;
-    amountOut?: number | null;
-    meta?: Record<string, any>;
-  }) => {
-    if (!isDemoMode || !address) return;
-
-    // Optimistic balance update for instant feedback
-    setWalletBalances(prev => prev.map(b => {
-      if (b.chain.toLowerCase() === payload.chain.toLowerCase() && b.token.toUpperCase() === payload.token.toUpperCase()) {
-        const requiresDebit = ['send', 'deposit', 'swap', 'plan_create', 'join'].includes(payload.type);
-        const pricePerUnit = b.balance > 0 ? b.usdValue / b.balance : 0;
-        if (requiresDebit) {
-          const newBal = Math.max(0, b.balance - payload.amount);
-          return { ...b, balance: newBal, usdValue: newBal * pricePerUnit };
-        } else if (['receive', 'topup', 'withdraw'].includes(payload.type)) {
-          const newBal = b.balance + payload.amount;
-          return { ...b, balance: newBal, usdValue: newBal * pricePerUnit };
-        }
-      }
-      if (payload.type === 'swap' && payload.tokenOut && b.chain.toLowerCase() === payload.chain.toLowerCase() && b.token.toUpperCase() === payload.tokenOut.toUpperCase()) {
-        const pricePerUnit = b.balance > 0 ? b.usdValue / b.balance : 0;
-        const newBal = b.balance + (payload.amountOut || 0);
-        return { ...b, balance: newBal, usdValue: newBal * pricePerUnit };
-      }
-      return b;
-    }));
-
-    try {
-      // Log to backend so SharedVault's ActivityFeed can display it
-      if (payload.meta?.planId && ['deposit', 'withdraw'].includes(payload.type)) {
-        authFetch(`${API_BASE}/api/activity`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            planId: payload.meta.planId,
-            type: payload.type === 'deposit' ? 'deposit' : 'withdrawal_executed',
-            actor: address,
-            amount: payload.amount,
-            metadata: { status: 'approved', demoTx: true, reason: 'Simulated Demo Transaction' },
-          }),
-        }).catch(err => console.warn('Failed to log demo activity:', err));
-      }
-
-      const updatedBalances = await applyDemoTransaction({
-        address,
-        ...payload,
-      });
-      setWalletBalances(updatedBalances);
-      
-      const typeLabel = payload.type.charAt(0).toUpperCase() + payload.type.slice(1);
-      addNotification('success', `🧪 Simulated ${typeLabel.replace('_', ' ')} of ${payload.amount} ${payload.token} successful.`);
-    } catch (err: any) {
-      console.error('Demo transaction failed:', err);
-      // Revert balances by refetching on error
-      refreshWalletBalances();
-      addNotification('error', `Demo transaction failed: ${err.message}`);
-    }
-  };
 
   const startPolling = () => {
     // Poll for vault updates every 10 seconds
@@ -745,7 +682,6 @@ function App() {
                 wallet={wallet}
                 onBack={() => setSelectedPlan(null)}
                 onUpdatePlan={updatePlan}
-                onTopUp={() => setShowReceiveModal(true)}
                 walletBalances={walletBalances}
                 />
             ) : (
@@ -776,7 +712,6 @@ function App() {
                     onCreatePlan={() => setShowCreateModal(true)}
                     onSelectPlan={setSelectedPlan}
                     onDeposit={setShowDepositModal}
-                    onUpdatePlan={updatePlan}
                   />
                 )}
                 {activeTab === 'swap' && (

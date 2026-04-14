@@ -1,16 +1,14 @@
 import { Icon } from './Icon';
 import type { SavingsPlan } from '../types';
-import { PlanCard } from './PlanCard';
 
 interface Props {
   plans: SavingsPlan[];
   onCreatePlan: () => void;
   onSelectPlan: (plan: SavingsPlan) => void;
   onDeposit: (plan: SavingsPlan) => void;
-  onUpdatePlan: (plan: SavingsPlan) => void;
 }
 
-export function PlansPage({ plans, onCreatePlan, onSelectPlan, onDeposit, onUpdatePlan }: Props) {
+export function PlansPage({ plans, onCreatePlan, onSelectPlan, onDeposit }: Props) {
   const individual = plans.filter(p => p.type === 'individual');
   const joint = plans.filter(p => p.type === 'joint');
 

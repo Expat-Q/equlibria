@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Icon } from './Icon';
-import { usePrivy, useWallets } from '../hooks/privy';
+import { useWallets } from '../hooks/privy';
 import { useAuthFetch } from '../hooks/useAuthFetch';
 import { API_BASE } from '../services/api';
 

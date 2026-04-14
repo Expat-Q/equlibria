@@ -317,7 +317,7 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>You Receive</span>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              {liveRate ? '● Live' : ''}
+              {quoteLoading ? 'Fetching...' : liveRate ? 'Live' : ''}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>

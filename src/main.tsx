@@ -23,8 +23,10 @@ function Root() {
           logo: 'https://docs.li.fi/logo.png',
         },
         embeddedWallets: {
-          createOnLogin: 'users-without-wallets' as any,
-          requireUserPasswordOnCreate: false,
+          ethereum: {
+            createOnLogin: 'users-without-wallets',
+            requireUserPasswordOnCreate: false,
+          },
         },
         defaultChain: base,
         supportedChains: [base, mainnet, arbitrum]

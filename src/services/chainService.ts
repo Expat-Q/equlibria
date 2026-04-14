@@ -6,7 +6,7 @@
  */
 
 import { createPublicClient, http, erc20Abi, formatUnits, formatEther } from 'viem';
-import { base, mainnet, arbitrum } from 'viem/chains';
+import { base, mainnet, arbitrum, bsc } from 'viem/chains';
 import { API_BASE } from './api';
 
 // ── Multi-chain public clients ────────────────────────────────
@@ -14,6 +14,7 @@ const clients = {
   ethereum: createPublicClient({ chain: mainnet, transport: http() }),
   base: createPublicClient({ chain: base, transport: http() }),
   arbitrum: createPublicClient({ chain: arbitrum, transport: http() }),
+  bnb: createPublicClient({ chain: bsc, transport: http() }),
 };
 
 export type SupportedChain = 'ethereum' | 'base' | 'arbitrum' | 'bnb';

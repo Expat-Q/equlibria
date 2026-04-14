@@ -28,7 +28,7 @@ function genId() {
   return Math.random().toString(36).slice(2, 10).toUpperCase();
 }
 
-export function CreatePlanModal({ onClose, onCreated, privy_id, isDemo, walletBalances, walletAddress, wallet, onDemoTransaction }: Props) {
+export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddress, wallet }: Props) {
   const authFetch = useAuthFetch();
   const [step, setStep] = useState<Step>('type');
   const [planType, setPlanType] = useState<PlanType>('individual');

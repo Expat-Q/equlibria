@@ -22,7 +22,7 @@ interface Props {
 
 type Status = 'idle' | 'quoting' | 'approving' | 'signing' | 'confirming' | 'success' | 'error';
 
-export function DepositModal({ plan, wallet, onClose, onDeposited, isDemo, onDemoTransaction }: Props) {
+export function DepositModal({ plan, wallet, onClose, onDeposited }: Props) {
   const { getAccessToken } = usePrivy();
   const [amount, setAmount] = useState('');
   const [status, setStatus] = useState<Status>('idle');
