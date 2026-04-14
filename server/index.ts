@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import type { NextFunction, Request, Response } from 'express';
 import { verifyAccessToken, type VerifyAccessTokenResponse } from '@privy-io/node';
+import { verifyMessage } from 'viem';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,28 +21,96 @@ app.use(express.json());
 const PRIVY_APP_ID = process.env.PRIVY_APP_ID || '';
 const PRIVY_VERIFICATION_KEY = process.env.PRIVY_VERIFICATION_KEY || '';
 
+const WALLET_AUTH_TTL_MINUTES = 10;
+const WALLET_AUTH_MESSAGE_PREFIX = 'Equilibria Vault login';
+
 type AuthedRequest = Request & { auth?: VerifyAccessTokenResponse; authUser?: { address: string; privy_id?: string | null } | null };
+
+const getHeaderValue = (req: Request, name: string) => {
+  const value = req.headers[name];
+  return Array.isArray(value) ? value[0] : value || '';
+};
+
+const buildWalletAuthMessage = (address: string, nonce: string) => {
+  return `${WALLET_AUTH_MESSAGE_PREFIX}\nAddress: ${address}\nNonce: ${nonce}\n`;
+};
+
+const verifyWalletSignaturePayload = async (params: { address: string; signature: string; nonce: string }) => {
+  const address = params.address?.toLowerCase();
+  if (!address || !params.signature || !params.nonce) {
+    return { ok: false, error: 'Missing wallet auth fields' };
+  }
+
+  if (!isDbConnected) {
+    return { ok: false, error: 'Database not connected' };
+  }
+
+  const record = await AuthNonce.findOne({
+    address,
+    nonce: params.nonce,
+    usedAt: null,
+    expiresAt: { $gt: new Date() },
+  });
+
+  if (!record) {
+    return { ok: false, error: 'Invalid or expired nonce' };
+  }
+
+  const message = buildWalletAuthMessage(address, params.nonce);
+  const isValid = await verifyMessage({
+    address: address as `0x${string}`,
+    message,
+    signature: params.signature as `0x${string}`,
+  });
+
+  if (!isValid) {
+    return { ok: false, error: 'Invalid signature' };
+  }
+
+  await AuthNonce.updateOne({ _id: record._id }, { usedAt: new Date() });
+  return { ok: true, address };
+};
 
 const requireAuth = async (req: AuthedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
 
-  if (!token) return res.status(401).json({ error: 'Missing auth token' });
-  if (!PRIVY_APP_ID || !PRIVY_VERIFICATION_KEY) {
-    return res.status(500).json({ error: 'Auth not configured' });
+  if (token) {
+    if (!PRIVY_APP_ID || !PRIVY_VERIFICATION_KEY) {
+      return res.status(500).json({ error: 'Auth not configured' });
+    }
+
+    try {
+      const payload = await verifyAccessToken({
+        access_token: token,
+        app_id: PRIVY_APP_ID,
+        verification_key: PRIVY_VERIFICATION_KEY,
+      });
+      req.auth = payload;
+      return next();
+    } catch (err) {
+      // Fall through to wallet signature auth
+    }
   }
 
-  try {
-    const payload = await verifyAccessToken({
-      access_token: token,
-      app_id: PRIVY_APP_ID,
-      verification_key: PRIVY_VERIFICATION_KEY,
+  const walletAddress = getHeaderValue(req, 'x-wallet-address');
+  const walletSignature = getHeaderValue(req, 'x-wallet-signature');
+  const walletNonce = getHeaderValue(req, 'x-wallet-nonce');
+
+  if (walletAddress && walletSignature && walletNonce) {
+    const result = await verifyWalletSignaturePayload({
+      address: walletAddress,
+      signature: walletSignature,
+      nonce: walletNonce,
     });
-    req.auth = payload;
-    return next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid auth token' });
+    if (result.ok && result.address) {
+      req.authUser = { address: result.address, privy_id: null };
+      return next();
+    }
+    return res.status(401).json({ error: result.error || 'Invalid wallet signature' });
   }
+
+  return res.status(401).json({ error: token ? 'Invalid auth token' : 'Missing auth token' });
 };
 
 const loadAuthUser = async (req: AuthedRequest) => {
@@ -153,6 +222,19 @@ const ContactSchema = new mongoose.Schema({
 
 ContactSchema.index({ userId: 1, contactAddress: 1 }, { unique: true });
 const Contact = mongoose.model('Contact', ContactSchema);
+
+// Wallet auth nonce model (for external wallet signatures)
+const AuthNonceSchema = new mongoose.Schema({
+  address: { type: String, required: true, lowercase: true, index: true },
+  nonce: { type: String, required: true },
+  expiresAt: { type: Date, required: true },
+  usedAt: { type: Date, default: null },
+  createdAt: { type: Date, default: Date.now },
+});
+
+AuthNonceSchema.index({ address: 1, nonce: 1 }, { unique: true });
+AuthNonceSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+const AuthNonce = mongoose.model('AuthNonce', AuthNonceSchema);
 
 // Shared Vault metadata (off-chain coordination only)
 const VaultSchema = new mongoose.Schema({
@@ -274,6 +356,42 @@ function getPrivy() {
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Wallet auth: request nonce
+app.post('/api/auth/nonce', async (req, res) => {
+  const { address } = req.body;
+  if (!address) return res.status(400).json({ error: 'address required' });
+  if (!isDbConnected) return res.status(503).json({ error: 'Database not connected' });
+
+  const createNonce = () => `${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+  const expiresAt = new Date(Date.now() + WALLET_AUTH_TTL_MINUTES * 60 * 1000);
+
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const nonce = createNonce();
+      await AuthNonce.create({ address: address.toLowerCase(), nonce, expiresAt });
+      return res.json({ nonce, message: buildWalletAuthMessage(address.toLowerCase(), nonce), expiresAt });
+    } catch (err: any) {
+      if (err.code !== 11000) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
+  }
+
+  return res.status(500).json({ error: 'Failed to create nonce' });
+});
+
+// Wallet auth: verify signature
+app.post('/api/auth/verify', async (req, res) => {
+  const { address, signature, nonce } = req.body;
+  if (!address || !signature || !nonce) {
+    return res.status(400).json({ error: 'address, signature, nonce required' });
+  }
+
+  const result = await verifyWalletSignaturePayload({ address, signature, nonce });
+  if (!result.ok) return res.status(401).json({ error: result.error || 'Invalid signature' });
+  return res.json({ ok: true, address: result.address });
 });
 
 // ── USER MANAGEMENT ROUTES ────────────────────────────────────
