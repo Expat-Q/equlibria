@@ -4,6 +4,7 @@ import { Icon } from './Icon';
 interface Props {
   onClose: () => void;
   walletAddress?: string;
+  displayName?: string;
   isDemo?: boolean;
   onDemoTransaction?: (payload: {
     type: 'topup';
@@ -14,7 +15,7 @@ interface Props {
   }) => Promise<void> | void;
 }
 
-export function ReceiveModal({ onClose, walletAddress = '', isDemo, onDemoTransaction }: Props) {
+export function ReceiveModal({ onClose, walletAddress = '', displayName = 'User', isDemo, onDemoTransaction }: Props) {
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -69,7 +70,7 @@ export function ReceiveModal({ onClose, walletAddress = '', isDemo, onDemoTransa
               Account Name
             </div>
             <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              {localStorage.getItem('equilibria_display_name') || 'User'} - Vault
+              {displayName} - Vault
             </div>
           </div>
           

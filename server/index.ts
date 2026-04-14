@@ -95,6 +95,8 @@ const EARN_API_BASE = 'https://earn.li.fi';
 const COMPOSER_API_BASE = 'https://li.quest';
 const COMPOSER_API_KEY = process.env.COMPOSER_API_KEY || '';
 const EARN_API_KEY = process.env.LIFI_EARN_API_KEY || '';
+const LIFI_INTEGRATOR = process.env.LIFI_INTEGRATOR || 'equilibria';
+const LIFI_FEE = process.env.LIFI_FEE || '';
 
 // Preferred chains for auto-yield routing (low gas L2s + Ethereum Mainnet)
 const PREFERRED_CHAIN_IDS = [1, 8453, 42161]; // Ethereum, Base, Arbitrum
@@ -126,6 +128,10 @@ const UserSchema = new mongoose.Schema({
   displayName: { type: String, default: '' },
   avatar: { type: String, default: null },
   bio: { type: String, default: '' },
+  theme: { type: String, default: 'light' },
+  currency: { type: String, default: 'USD' },
+  hasSeenTour: { type: Boolean, default: false },
+  mockMode: { type: Boolean, default: false },
   contacts: [{ type: String }], // Array of contact addresses
   tokenPoints: { type: Number, default: 0 },
   referralCode: { type: String, unique: true, sparse: true },
@@ -213,6 +219,35 @@ const ActivityLogSchema = new mongoose.Schema({
 ActivityLogSchema.index({ planId: 1, createdAt: -1 });
 const ActivityLog = mongoose.model('ActivityLog', ActivityLogSchema);
 
+// User activity feed (dashboard recent activity)
+const UserActivitySchema = new mongoose.Schema({
+  userAddress: { type: String, required: true, index: true },
+  type: { type: String, required: true },
+  name: { type: String, required: true },
+  amount: { type: Number, default: 0 },
+  txHash: { type: String, default: null },
+  chainId: { type: Number, default: null },
+  chain: { type: String, default: null },
+  icon: { type: String, default: null },
+  metadata: { type: Object, default: {} },
+  createdAt: { type: Date, default: Date.now },
+});
+
+UserActivitySchema.index({ userAddress: 1, createdAt: -1 });
+const UserActivity = mongoose.model('UserActivity', UserActivitySchema);
+
+// Notification feed (dashboard notifications)
+const NotificationSchema = new mongoose.Schema({
+  userAddress: { type: String, required: true, index: true },
+  type: { type: String, enum: ['success', 'error', 'info', 'update'], required: true },
+  message: { type: String, required: true },
+  read: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now },
+});
+
+NotificationSchema.index({ userAddress: 1, createdAt: -1 });
+const Notification = mongoose.model('Notification', NotificationSchema);
+
 // (Demo models and memory fallbacks removed — production mode only)
 
 // ── Privy Signer (lazy init to avoid crash if keys not set) ────
@@ -295,6 +330,10 @@ app.get('/api/users/:address', async (req, res) => {
       displayName: user.displayName,
       avatar: user.avatar,
       bio: user.bio,
+      theme: user.theme,
+      currency: user.currency,
+      hasSeenTour: user.hasSeenTour,
+      mockMode: user.mockMode,
       referralCode: user.referralCode,
       tokenPoints: user.tokenPoints,
       createdAt: user.createdAt,
@@ -326,6 +365,10 @@ app.patch('/api/users', requireAuth, async (req: AuthedRequest, res) => {
     if (bio !== undefined) updateFields.bio = bio;
     if (username !== undefined) updateFields.username = username.toLowerCase().replace(/[^a-z0-9_]/g, '');
     if (email !== undefined) updateFields.email = email;
+    if (req.body.theme !== undefined) updateFields.theme = req.body.theme;
+    if (req.body.currency !== undefined) updateFields.currency = req.body.currency;
+    if (req.body.hasSeenTour !== undefined) updateFields.hasSeenTour = req.body.hasSeenTour;
+    if (req.body.mockMode !== undefined) updateFields.mockMode = req.body.mockMode;
 
     const query = address ? { address: address.toLowerCase() } : { privy_id };
     const user = await User.findOneAndUpdate(
@@ -714,6 +757,15 @@ app.post('/api/vaults', requireAuth, async (req: AuthedRequest, res) => {
       defiChainId,
       defiVaultAddress,
     });
+
+    await ActivityLog.create({
+      planId,
+      type: 'vault_created',
+      actor: creatorAddress.toLowerCase(),
+      amount: 0,
+      metadata: { planName, token, chain, category, depositToDefi: !!depositToDefi },
+    });
+
     return res.json({ vault });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1009,6 +1061,120 @@ app.get('/api/activity/:planId', requireAuth, async (req: AuthedRequest, res) =>
   }
 });
 
+// GET /api/activity/user/:address - Get recent activity for a user
+app.get('/api/activity/user/:address', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const authErr = await ensureUserMatchesAddress(req, res, req.params.address);
+    if (authErr) return authErr;
+
+    const items = await UserActivity.find({ userAddress: req.params.address.toLowerCase() })
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    return res.json({ items });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/activity/user - Log a user activity item
+app.post('/api/activity/user', requireAuth, async (req: AuthedRequest, res) => {
+  const { userAddress, type, name, amount, txHash, chainId, chain, icon, metadata } = req.body;
+
+  if (!userAddress || !type || !name) {
+    return res.status(400).json({ error: 'userAddress, type, name required' });
+  }
+
+  const authErr = await ensureUserMatchesAddress(req, res, userAddress);
+  if (authErr) return authErr;
+
+  try {
+    const item = await UserActivity.create({
+      userAddress: userAddress.toLowerCase(),
+      type,
+      name,
+      amount: amount || 0,
+      txHash: txHash || null,
+      chainId: chainId || null,
+      chain: chain || null,
+      icon: icon || null,
+      metadata: metadata || {},
+    });
+    return res.status(201).json({ item });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/notifications/:address - Get recent notifications for a user
+app.get('/api/notifications/:address', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const authErr = await ensureUserMatchesAddress(req, res, req.params.address);
+    if (authErr) return authErr;
+
+    const items = await Notification.find({ userAddress: req.params.address.toLowerCase() })
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    return res.json({ items });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/notifications - Add a notification
+app.post('/api/notifications', requireAuth, async (req: AuthedRequest, res) => {
+  const { userAddress, type, message } = req.body;
+  if (!userAddress || !type || !message) {
+    return res.status(400).json({ error: 'userAddress, type, message required' });
+  }
+
+  const authErr = await ensureUserMatchesAddress(req, res, userAddress);
+  if (authErr) return authErr;
+
+  try {
+    const item = await Notification.create({
+      userAddress: userAddress.toLowerCase(),
+      type,
+      message,
+      read: false,
+    });
+    return res.status(201).json({ item });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/notifications/:id/read - Mark a notification as read
+app.patch('/api/notifications/:id/read', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const item = await Notification.findById(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Notification not found' });
+
+    const authErr = await ensureUserMatchesAddress(req, res, item.userAddress);
+    if (authErr) return authErr;
+
+    item.read = true;
+    await item.save();
+    return res.json({ item });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/notifications/:address - Clear all notifications
+app.delete('/api/notifications/:address', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const authErr = await ensureUserMatchesAddress(req, res, req.params.address);
+    if (authErr) return authErr;
+
+    await Notification.deleteMany({ userAddress: req.params.address.toLowerCase() });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── LI.FI EARN DATA API PROXY ROUTES ──────────────────────────
 // These proxy through our server so the frontend never touches external APIs directly.
 
@@ -1031,6 +1197,38 @@ app.get('/api/earn/vaults', async (req, res) => {
   } catch (err: any) {
     console.error('❌ Earn vaults proxy error:', err.message);
     return res.status(502).json({ error: 'Failed to fetch vaults from LI.FI' });
+  }
+});
+
+// GET /api/earn/supported-tokens - List supported underlying tokens by chain
+app.get('/api/earn/supported-tokens', async (req, res) => {
+  try {
+    const chainId = req.query.chainId ? Number(req.query.chainId) : null;
+    const chainIds = chainId ? [chainId] : PREFERRED_CHAIN_IDS;
+    const headers: Record<string, string> = {};
+    if (EARN_API_KEY) headers['x-lifi-api-key'] = EARN_API_KEY;
+
+    const byChain: Record<string, string[]> = {};
+
+    for (const id of chainIds) {
+      const response = await fetch(`${EARN_API_BASE}/v1/earn/vaults?chainId=${id}`, { headers });
+      const data = await response.json();
+      const vaults = data?.data || [];
+      const tokens = new Set<string>();
+
+      for (const v of vaults) {
+        if (v.isTransactional !== true) continue;
+        const symbol = v.underlyingTokens?.[0]?.symbol;
+        if (symbol) tokens.add(symbol.toUpperCase());
+      }
+
+      byChain[String(id)] = Array.from(tokens).sort();
+    }
+
+    return res.json({ chains: byChain });
+  } catch (err: any) {
+    console.error('❌ Supported tokens lookup error:', err.message);
+    return res.status(502).json({ error: 'Failed to fetch supported tokens from LI.FI' });
   }
 });
 
@@ -1062,6 +1260,16 @@ app.get('/api/earn/best-vault', async (req, res) => {
       'seamless',
     ]);
     const normalizeProtocol = (name?: string) => (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const normalizeSymbol = (symbol?: string) => (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const matchesRequestedToken = (symbol?: string) => {
+      if (!requestedToken) return true;
+      const normalized = normalizeSymbol(symbol);
+      if (!normalized) return false;
+      if (requestedToken === 'ETH') return normalized.includes('ETH');
+      if (requestedToken === 'USDC') return normalized.startsWith('USDC');
+      if (requestedToken === 'USDT') return normalized.startsWith('USDT');
+      return normalized === requestedToken;
+    };
 
     for (const chainId of chainIds) {
       const url = `${EARN_API_BASE}/v1/earn/vaults?chainId=${chainId}`;
@@ -1075,9 +1283,9 @@ app.get('/api/earn/best-vault', async (req, res) => {
       const candidates = vaults.filter((v: any) => {
         if (v.isTransactional !== true) return false;
         if (v.analytics?.apy?.total == null || v.analytics.apy.total <= 0) return false;
-        const underlying = v.underlyingTokens?.[0]?.symbol?.toUpperCase();
+        const underlyingSymbol = v.underlyingTokens?.[0]?.symbol;
         if (requestedToken) {
-          return underlying === requestedToken;
+          return matchesRequestedToken(underlyingSymbol);
         }
         return v.tags?.includes('stablecoin');
       });
@@ -1185,9 +1393,12 @@ app.post('/api/deposit-quote', async (req, res) => {
       fromAddress,
       toAddress: toAddress || fromAddress,
       fromAmount: String(fromAmount),
-      integrator: 'equilibria-protocol', // Platform identifier
-      fee: '0.01', // 1% Platform creation fee
+      integrator: LIFI_INTEGRATOR, // Platform identifier
     });
+
+    if (LIFI_FEE) {
+      params.set('fee', LIFI_FEE);
+    }
 
     const headers: Record<string, string> = {};
     if (COMPOSER_API_KEY) headers['x-lifi-api-key'] = COMPOSER_API_KEY;
@@ -1196,13 +1407,16 @@ app.post('/api/deposit-quote', async (req, res) => {
     const data = await response.json();
 
     if (!response.ok) {
-      return res.status(response.status).json(data);
+      return res.status(response.status).json({
+        error: data?.message || data?.error || 'Composer quote failed',
+        details: data,
+      });
     }
 
     return res.json(data);
   } catch (err: any) {
     console.error('❌ Deposit quote error:', err.message);
-    return res.status(502).json({ error: 'Failed to get deposit quote from Composer' });
+    return res.status(502).json({ error: err?.message || 'Failed to get deposit quote from Composer' });
   }
 });
 

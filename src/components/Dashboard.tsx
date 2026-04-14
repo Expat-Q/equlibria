@@ -19,11 +19,12 @@ interface Props {
   walletBalances?: Array<{ chain: string; token: string; balance: number; usdValue: number }>;
   balancesLoading?: boolean;
   recentActivity?: Array<{ id: string; name: string; amount: number; date: string; icon: string; txHash?: string; chainId?: number; chain?: string }>;
+  displayName?: string;
 }
 
 
 
-export function Dashboard({ plans, onCreatePlan, onSelectPlan, onGoToPlans, onGoToStore, onSend, onReceive, onSwap, onDepositNative, isDemo, walletBalances, balancesLoading, recentActivity }: Props) {
+export function Dashboard({ plans, onCreatePlan, onSelectPlan, onGoToPlans, onGoToStore, onSend, onReceive, onSwap, onDepositNative, isDemo, walletBalances, balancesLoading, recentActivity, displayName }: Props) {
   const [counter, setCounter] = useState(0);
   const [statsTab, setStatsTab] = useState<'weekly' | 'monthly'>('weekly');
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar');
@@ -75,7 +76,7 @@ export function Dashboard({ plans, onCreatePlan, onSelectPlan, onGoToPlans, onGo
   const activeEarningCount = plans.filter(p => p.depositToDefi).length;
   const liveYield = baseYield + (activeEarningCount * counter * 0.000001);
 
-  const displayName = localStorage.getItem('equilibria_display_name') || 'User';
+  const greetingName = displayName || 'User';
 
   const handleSend = () => {
     onSend?.();
@@ -138,7 +139,7 @@ export function Dashboard({ plans, onCreatePlan, onSelectPlan, onGoToPlans, onGo
   return (
     <div>
       <div className="greeting-section">
-        <h1 className="greeting-title">Hello, {displayName}! 👋</h1>
+        <h1 className="greeting-title">Hello, {greetingName}! 👋</h1>
         <p className="greeting-sub">Here's everything about your Equilibria account.</p>
       </div>
 

@@ -7,7 +7,7 @@ import { API_BASE } from '../services/api';
 
 interface Props {
   onClose: () => void;
-  onCreated: (plan: SavingsPlan) => void;
+  onCreated: (plan: SavingsPlan) => Promise<void> | void;
   privy_id?: string;
   isDemo?: boolean;
   walletBalances?: Array<{ chain: string; token: string; balance: number; usdValue: number }>;
@@ -48,6 +48,8 @@ export function CreatePlanModal({ onClose, onCreated, privy_id, isDemo, walletBa
   const [demoError, setDemoError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [poolLabel, setPoolLabel] = useState('');
+  const [supportedTokens, setSupportedTokens] = useState<string[]>([]);
+  const [supportedTokensLoading, setSupportedTokensLoading] = useState(false);
 
   const chainIdMap: Record<ChainName, number> = {
     ethereum: 1,
@@ -71,6 +73,28 @@ export function CreatePlanModal({ onClose, onCreated, privy_id, isDemo, walletBa
     };
     fetchApy();
   }, [token, chain]);
+
+  useEffect(() => {
+    const fetchSupportedTokens = async () => {
+      setSupportedTokensLoading(true);
+      try {
+        const chainId = chainIdMap[chain];
+        const res = await fetch(`${API_BASE}/api/earn/supported-tokens?chainId=${chainId}`);
+        if (res.ok) {
+          const data = await res.json();
+          const tokens = data?.chains?.[String(chainId)] || [];
+          setSupportedTokens(tokens.map((t: string) => t.toUpperCase()));
+        } else {
+          setSupportedTokens([]);
+        }
+      } catch {
+        setSupportedTokens([]);
+      } finally {
+        setSupportedTokensLoading(false);
+      }
+    };
+    fetchSupportedTokens();
+  }, [chain]);
 
   const steps: Step[] = planType === 'joint' 
     ? ['type', 'category', 'chain', 'details', 'partner', 'warning', 'policy', 'success']
@@ -121,6 +145,10 @@ export function CreatePlanModal({ onClose, onCreated, privy_id, isDemo, walletBa
 
       if (!wallet) {
         throw new Error('No wallet connected. Please log in to create a plan.');
+      }
+
+      if (depositToDefi && supportedTokens.length > 0 && !supportedTokens.includes(token)) {
+        throw new Error(`No DeFi vault supports ${token} on ${chain}. Supported: ${supportedTokens.join(', ')}`);
       }
 
       const { depositToPool, depositToTreasury } = await import('../services/chainService');
@@ -193,7 +221,7 @@ export function CreatePlanModal({ onClose, onCreated, privy_id, isDemo, walletBa
         creationChainId,
       };
 
-      onCreated(plan);
+      await onCreated(plan);
 
       // Reward points for creating a plan
       if (walletAddress) {
@@ -407,6 +435,20 @@ export function CreatePlanModal({ onClose, onCreated, privy_id, isDemo, walletBa
                   </div>
                 ))}
               </div>
+              <div style={{ marginTop: '0.6rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {supportedTokensLoading ? (
+                  'Checking supported DeFi tokens...'
+                ) : supportedTokens.length > 0 ? (
+                  <>DeFi supported on {chain}: {supportedTokens.join(', ')}</>
+                ) : (
+                  'DeFi supported tokens unavailable.'
+                )}
+              </div>
+              {supportedTokens.length > 0 && !supportedTokens.includes(token) && depositToDefi && (
+                <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--danger)' }}>
+                  {token} is not supported for DeFi on {chain}. Choose another token or disable DeFi.
+                </div>
+              )}
             </div>
 
             <div className="form-section">

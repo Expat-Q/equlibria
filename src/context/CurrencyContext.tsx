@@ -1,4 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { useWallets } from '../hooks/privy';
+import { useAuthFetch } from '../hooks/useAuthFetch';
+import { API_BASE } from '../services/api';
 
 export type CurrencyCode = 'USD' | 'NGN' | 'EUR' | 'GBP' | 'KES';
 
@@ -29,14 +32,37 @@ const SYMBOLS: Record<CurrencyCode, string> = {
 const CurrencyContext = createContext<CurrencyContextType | undefined>(undefined);
 
 export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>(() => {
-    const saved = localStorage.getItem('equilibria_currency');
-    return (saved as CurrencyCode) || 'USD';
-  });
+  const { wallets } = useWallets();
+  const authFetch = useAuthFetch();
+  const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>('USD');
+  const hasLoadedRef = useRef(false);
+  const wallet = wallets.find(w => (w as any).walletClientType === 'privy' || w.address.startsWith('0x'));
+  const address = wallet?.address ?? '';
 
   useEffect(() => {
-    localStorage.setItem('equilibria_currency', selectedCurrency);
-  }, [selectedCurrency]);
+    if (!address) return;
+    const loadCurrency = async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/api/users/${address}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.currency) setSelectedCurrency(data.currency as CurrencyCode);
+        hasLoadedRef.current = true;
+      } catch {
+        hasLoadedRef.current = true;
+      }
+    };
+    loadCurrency();
+  }, [address]);
+
+  useEffect(() => {
+    if (!address || !hasLoadedRef.current) return;
+    authFetch(`${API_BASE}/api/users`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: address.toLowerCase(), currency: selectedCurrency }),
+    }).catch(() => undefined);
+  }, [address, selectedCurrency]);
 
   const convert = (usdAmount: number) => {
     return usdAmount * RATES[selectedCurrency];

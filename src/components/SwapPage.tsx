@@ -86,7 +86,7 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
           fromChain: chainId,
           fromToken: fromAddr,
           toToken: toAddr,
-          fromAddress: '0x0000000000000000000000000000000000000000',
+          fromAddress: _wallet?.address || '0x0000000000000000000000000000000000000000',
           fromAmount: rawAmount,
           slippage: slippage / 100,
         }),
@@ -123,6 +123,10 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
 
   const handleSwap = async () => {
     if (!fromAmt || parseFloat(fromAmt) <= 0) return;
+    if (parseFloat(fromAmt) > fromBalance) {
+      setSwapError('Insufficient balance for this swap.');
+      return;
+    }
     setSwapping(true);
     setSwapError('');
     setSwapTxHash('');

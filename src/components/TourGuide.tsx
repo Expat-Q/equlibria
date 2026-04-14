@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { usePrivy } from '../hooks/privy';
+import { usePrivy, useWallets } from '../hooks/privy';
+import { useAuthFetch } from '../hooks/useAuthFetch';
+import { API_BASE } from '../services/api';
 
 type Step = {
   target: string;
@@ -11,9 +13,13 @@ type Step = {
 
 export function TourGuide() {
   const { authenticated, user } = usePrivy();
+  const { wallets } = useWallets();
+  const authFetch = useAuthFetch();
   const [run, setRun] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [Joyride, setJoyride] = useState<any>(null);
+  const wallet = wallets.find(w => (w as any).walletClientType === 'privy' || w.address.startsWith('0x'));
+  const address = wallet?.address ?? '';
 
   useEffect(() => {
     import('react-joyride').then((mod) => {
@@ -25,14 +31,23 @@ export function TourGuide() {
   }, []);
 
   useEffect(() => {
-    if (!Joyride || !authenticated) return;
-    const tourKey = user?.id ? `has_seen_tour_${user.id}` : 'has_seen_tour_guest';
-    const hasSeenTour = localStorage.getItem(tourKey);
-    if (!hasSeenTour) {
-      const timer = setTimeout(() => setRun(true), 1200);
-      return () => clearTimeout(timer);
-    }
-  }, [Joyride, authenticated, user?.id]);
+    if (!Joyride || !authenticated || !address) return;
+    const loadTourState = async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/api/users/${address.toLowerCase()}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.hasSeenTour) {
+          const timer = setTimeout(() => setRun(true), 1200);
+          return () => clearTimeout(timer);
+        }
+      } catch (err) {
+        console.warn('Failed to load tour state:', err);
+      }
+      return undefined;
+    };
+    loadTourState();
+  }, [Joyride, authenticated, address, user?.id]);
 
   // Listen for manual tour trigger
   useEffect(() => {
@@ -46,8 +61,12 @@ export function TourGuide() {
   const handleCallback = (data: { status: string }) => {
     if (data.status === 'finished' || data.status === 'skipped') {
       setRun(false);
-      const tourKey = user?.id ? `has_seen_tour_${user.id}` : 'has_seen_tour_guest';
-      localStorage.setItem(tourKey, 'true');
+      if (!address) return;
+      authFetch(`${API_BASE}/api/users`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: address.toLowerCase(), hasSeenTour: true }),
+      }).catch(err => console.warn('Failed to persist tour state:', err));
     }
   };
 

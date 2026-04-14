@@ -11,15 +11,12 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
   const authFetch = useAuthFetch();
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
   const [copied, setCopied] = useState(false);
-  const [displayName, setDisplayName] = useState(
-    () => localStorage.getItem('equilibria_display_name') || ''
-  );
-  const [reachTag, setReachTag] = useState(
-    () => localStorage.getItem('equilibria_reach_tag') || ''
-  );
+  const [displayName, setDisplayName] = useState('');
+  const [reachTag, setReachTag] = useState('');
   const [email, setEmail] = useState('');
   const [savedOk, setSavedOk] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [mockMode, setMockMode] = useState(false);
   const [privateKeyInput, setPrivateKeyInput] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   const [storedKey, setStoredKey] = useState(() => localStorage.getItem('equilibria_imported_pk') || '');
@@ -43,6 +40,7 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
           if (data.displayName) setDisplayName(data.displayName);
           if (data.username) setReachTag(data.username);
           if (data.email) setEmail(data.email);
+          if (typeof data.mockMode === 'boolean') setMockMode(data.mockMode);
         }
       } catch (err) {
         console.warn('Failed to load profile from backend');
@@ -60,10 +58,6 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
   const save = async () => {
     setSaving(true);
     
-    // Always save to localStorage as fallback
-    localStorage.setItem('equilibria_display_name', displayName);
-    localStorage.setItem('equilibria_reach_tag', reachTag);
-
     // Persist to backend
     try {
       const res = await authFetch(`${API_BASE}/api/users`, {
@@ -80,12 +74,11 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
       if (res.ok) {
         setSavedOk(true);
       } else {
-        console.warn('Backend save failed, using localStorage');
-        setSavedOk(true); // Still show success since localStorage worked
+        setSavedOk(false);
       }
     } catch (err) {
       console.warn('Failed to save to backend:', err);
-      setSavedOk(true); // localStorage still saved
+      setSavedOk(false);
     }
     
     setSaving(false);
@@ -304,10 +297,15 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
                 <label className="switch">
                   <input 
                     type="checkbox" 
-                    checked={localStorage.getItem('equilibria_mock') === 'true'}
+                    checked={mockMode}
                     onChange={(e) => {
-                      localStorage.setItem('equilibria_mock', e.target.checked ? 'true' : 'false');
-                      window.location.reload();
+                      const next = e.target.checked;
+                      setMockMode(next);
+                      authFetch(`${API_BASE}/api/users`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ address: address.toLowerCase(), mockMode: next }),
+                      }).catch(err => console.warn('Failed to save mock mode:', err));
                     }} 
                   />
                   <span className="slider round"></span>

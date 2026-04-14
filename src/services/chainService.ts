@@ -286,8 +286,11 @@ export async function getBestVault(token?: SupportedToken, chainId?: number): Pr
   if (chainId) params.set('chainId', String(chainId));
 
   const res = await fetch(`${API_BASE}/api/earn/best-vault?${params.toString()}`);
-  if (!res.ok) throw new Error('Failed to fetch best vault');
-  const { vault } = await res.json();
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error || 'Failed to fetch best vault');
+  }
+  const { vault } = data;
   return vault;
 }
 
@@ -400,8 +403,14 @@ export async function depositToPool(
   amount: string,
   chain: SupportedChain
 ): Promise<{ txHash: string; apy: number; vaultName?: string; protocol?: string; chainId?: number; explorerUrl?: string; vaultAddress?: string; status?: string; substatus?: string }> {
-  // Step 1: Find the best vault
-  const bestVault = await getBestVault(token, CHAIN_IDS[chain]);
+  // Step 1: Find the best vault (fallback to any supported chain if none on selected chain)
+  let bestVault: Awaited<ReturnType<typeof getBestVault>>;
+  try {
+    bestVault = await getBestVault(token, CHAIN_IDS[chain]);
+  } catch (err) {
+    console.warn('No vault on selected chain, trying cross-chain vault:', err);
+    bestVault = await getBestVault(token);
+  }
   console.log(`🔍 Best vault: ${bestVault.name} (${bestVault.protocol}) @ ${bestVault.apy.total}% APY on chain ${bestVault.chainId}`);
 
   // Step 2: Get the deposit quote from LI.FI Composer
@@ -418,13 +427,14 @@ export async function depositToPool(
       bestVault.address,
       bestVault.chainId
     );
-  } catch (err) {
-    console.warn('LI.FI quote failed, falling back to direct treasury deposit:', err);
+  } catch (err: any) {
+    const message = err?.message || 'Composer quote failed';
+    console.warn('LI.FI quote failed:', message);
+    throw new Error(message);
   }
 
-  // If quote failed, fallback to treasury deposit (acting as a basic vault)
   if (!quote || !quote.transactionRequest) {
-    throw new Error('No DeFi vault supports this token on the selected chain. Disable DeFi to use treasury custody.');
+    throw new Error('Composer quote did not return a transaction request for this vault.');
   }
 
   console.log('📋 LI.FI Quote received:', {

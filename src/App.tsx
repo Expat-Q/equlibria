@@ -61,8 +61,10 @@ function App() {
   const [walletBalances, setWalletBalances] = useState<WalletBalance[]>([]);
   const [balancesLoading, setBalancesLoading] = useState(false);
   const [recentActivity, setRecentActivity] = useState<RecentActivityItem[]>([]);
+  const [displayName, setDisplayName] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const hasLoadedProfileRef = useRef(false);
   const isDemoMode = IS_DEMO;
 
   const privy_id = user?.id || '';
@@ -72,6 +74,21 @@ function App() {
 
   const addRecentActivity = (item: RecentActivityItem) => {
     setRecentActivity(prev => [item, ...prev].slice(0, 8));
+    if (!address) return;
+    authFetch(`${API_BASE}/api/activity/user`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userAddress: address,
+        type: item.icon || 'activity',
+        name: item.name,
+        amount: item.amount,
+        txHash: item.txHash,
+        chainId: item.chainId,
+        chain: item.chain,
+        icon: item.icon,
+      }),
+    }).catch(err => console.warn('Failed to persist activity:', err));
   };
 
   // Notification Management
@@ -85,54 +102,62 @@ function App() {
       action,
     };
     setNotifications(prev => [notif, ...prev]);
-    
-    // Persist to localStorage
-    const stored = localStorage.getItem('equilibria_notifications');
-    const history = stored ? JSON.parse(stored) : [];
-    localStorage.setItem('equilibria_notifications', JSON.stringify([
-      { ...notif, timestamp: notif.timestamp.toISOString() },
-      ...history,
-    ].slice(0, 50))); // Keep last 50 notifications
+    if (!address) return;
+    authFetch(`${API_BASE}/api/notifications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userAddress: address, type, message }),
+    })
+      .then(async res => {
+        if (!res.ok) throw new Error('Failed to persist notification');
+        const data = await res.json();
+        if (data.item?._id) {
+          setNotifications(prev => prev.map(n => (n.id === notif.id ? { ...n, id: data.item._id } : n)));
+        }
+      })
+      .catch(err => console.warn('Failed to persist notification:', err));
   };
 
   const markNotificationAsRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    if (!address) return;
+    authFetch(`${API_BASE}/api/notifications/${id}/read`, { method: 'PATCH' })
+      .catch(err => console.warn('Failed to mark notification as read:', err));
   };
 
   const clearNotifications = () => {
     setNotifications([]);
-    localStorage.removeItem('equilibria_notifications');
+    if (!address) return;
+    authFetch(`${API_BASE}/api/notifications/${address}`, { method: 'DELETE' })
+      .catch(err => console.warn('Failed to clear notifications:', err));
   };
 
-  // In demo mode, always start with a clean slate — wipe stale plans from localStorage on every mount
-  useEffect(() => {
-    if (isDemoMode) {
-      localStorage.removeItem('equilibria_plans');
-      setPlans([]);
+  const loadNotifications = async () => {
+    try {
+      const response = await authFetch(`${API_BASE}/api/notifications/${address}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const items = (data.items || []).map((n: any) => ({
+        id: n._id,
+        type: n.type,
+        message: n.message,
+        timestamp: new Date(n.createdAt),
+        read: n.read,
+      }));
+      setNotifications(items);
+    } catch (err) {
+      console.warn('Failed to load notifications:', err);
     }
-  }, []);
-
-  // Load notification history on mount
-  useEffect(() => {
-    const stored = localStorage.getItem('equilibria_notifications');
-    if (stored) {
-      try {
-        const history = JSON.parse(stored).map((n: any) => ({
-          ...n,
-          timestamp: new Date(n.timestamp),
-        }));
-        setNotifications(history.slice(0, 20)); // Load last 20
-      } catch (e) {
-        console.error('Failed to load notifications:', e);
-      }
-    }
-  }, []);
+  };
 
   // Register user on first login
   useEffect(() => {
     if (authenticated && privy_id && address) {
       registerUser();
       syncVaultsFromBackend();
+      loadRecentActivity();
+      loadNotifications();
+      loadUserProfile();
       // Start real-time polling loop
       startPolling();
     }
@@ -300,77 +325,96 @@ function App() {
       const data = await response.json();
       const backendVaults = data.vaults || [];
 
-      // Merge backend vaults with local plans
-      const vaultMap = new Map(plans.map(p => [p.id, p]));
+      // Merge backend vaults with current plans
+      setPlans(prevPlans => {
+        const vaultMap = new Map(prevPlans.map(p => [p.id, p]));
 
-      for (const vault of backendVaults) {
-        const planId = vault.planId;
-        const vaultBalance = vault.currentAmount || 0;
-        const syncedChain: ChainName = SUPPORTED_CHAINS.includes(vault.chain)
-          ? vault.chain
-          : 'base';
-        setLastVaultState(prev => new Map(prev).set(planId, vaultBalance));
+        for (const vault of backendVaults) {
+          const planId = vault.planId;
+          const vaultBalance = vault.currentAmount || 0;
+          const syncedChain: ChainName = SUPPORTED_CHAINS.includes(vault.chain)
+            ? vault.chain
+            : 'base';
+          setLastVaultState(prev => new Map(prev).set(planId, vaultBalance));
 
-        if (!vaultMap.has(planId)) {
-          // Plan was loaded from backend (might not be in localStorage yet, or user switched devices)
-          const synced: SavingsPlan = {
-            id: planId,
-            name: vault.planName,
-            category: vault.category || 'other',
-            type: vault.type === 'private' ? 'individual' : (vault.type || 'individual'),
-            token: vault.token as any,
-            chain: syncedChain,
-            targetAmount: vault.targetAmount,
-            currentAmount: vaultBalance,
-            myContribution: vault.creatorAddress === address ? vault.creatorContribution || vaultBalance : 0,
-            partnerContribution: vault.creatorAddress === address ? vault.partnerContribution || 0 : vault.creatorContribution || vaultBalance,
-            yieldEarned: vault.yieldEarned || 0,
-            apy: vault.apy || 0,
-            createdAt: vault.createdAt,
-            lockDurationDays: vault.lockDurationDays || 30,
-            withdrawalDate: vault.withdrawalDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-            depositToDefi: vault.depositToDefi !== undefined ? vault.depositToDefi : true,
-            defiProtocol: vault.defiProtocol,
-            defiVaultName: vault.defiVaultName,
-            defiChainId: vault.defiChainId,
-            defiVaultAddress: vault.defiVaultAddress,
-            policyAgreed: true,
-            sharedOnX: vault.sharedOnX || false,
-            partnerAddress: vault.creatorAddress === address ? vault.partnerAddress : vault.creatorAddress,
-            partnerInviteCode: vault.inviteCode,
-            isPartnerAccepted: vault.isPartnerAccepted,
-          };
-          vaultMap.set(planId, synced);
+          if (!vaultMap.has(planId)) {
+            // Plan was loaded from backend (might not be in localStorage yet, or user switched devices)
+            const synced: SavingsPlan = {
+              id: planId,
+              name: vault.planName,
+              category: vault.category || 'other',
+              type: vault.type === 'private' ? 'individual' : (vault.type || 'individual'),
+              token: vault.token as any,
+              chain: syncedChain,
+              targetAmount: vault.targetAmount,
+              currentAmount: vaultBalance,
+              myContribution: vault.creatorAddress === address ? vault.creatorContribution || vaultBalance : 0,
+              partnerContribution: vault.creatorAddress === address ? vault.partnerContribution || 0 : vault.creatorContribution || vaultBalance,
+              yieldEarned: vault.yieldEarned || 0,
+              apy: vault.apy || 0,
+              createdAt: vault.createdAt,
+              lockDurationDays: vault.lockDurationDays || 30,
+              withdrawalDate: vault.withdrawalDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+              depositToDefi: vault.depositToDefi !== undefined ? vault.depositToDefi : true,
+              defiProtocol: vault.defiProtocol,
+              defiVaultName: vault.defiVaultName,
+              defiChainId: vault.defiChainId,
+              defiVaultAddress: vault.defiVaultAddress,
+              policyAgreed: true,
+              sharedOnX: vault.sharedOnX || false,
+              partnerAddress: vault.creatorAddress === address ? vault.partnerAddress : vault.creatorAddress,
+              partnerInviteCode: vault.inviteCode,
+              isPartnerAccepted: vault.isPartnerAccepted,
+            };
+            vaultMap.set(planId, synced);
 
-          // Show notification if this is a partner join
-          if (vault.partnerAddress === address) {
-            addNotification(
-              'info',
-              `You were added to "${vault.planName}" by partner!`,
-              {
-                label: 'Open',
-                onClick: () => {
-                  const plan = vaultMap.get(planId);
-                  if (plan) setSelectedPlan(plan);
-                },
-              }
-            );
+            // Show notification if this is a partner join
+            if (vault.partnerAddress === address) {
+              addNotification(
+                'info',
+                `You were added to "${vault.planName}" by partner!`,
+                {
+                  label: 'Open',
+                  onClick: () => {
+                    const plan = vaultMap.get(planId);
+                    if (plan) setSelectedPlan(plan);
+                  },
+                }
+              );
+            }
           }
         }
-      }
 
-      setPlans(Array.from(vaultMap.values()));
+        return Array.from(vaultMap.values());
+      });
     } catch (err) {
       console.error('Failed to sync vaults:', err);
     }
   };
 
+  const loadRecentActivity = async () => {
+    try {
+      const response = await authFetch(`${API_BASE}/api/activity/user/${address}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const items = (data.items || []).map((item: any) => ({
+        id: item._id,
+        name: item.name,
+        amount: item.amount || 0,
+        date: new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        icon: item.icon || 'savings',
+        txHash: item.txHash,
+        chainId: item.chainId,
+        chain: item.chain,
+      }));
+      setRecentActivity(items);
+    } catch (err) {
+      console.warn('Failed to load recent activity:', err);
+    }
+  };
+
   const registerUser = async () => {
     try {
-      // Check if user already registered
-      const existing = localStorage.getItem(`equilibria_user_${address}`);
-      if (existing) return;
-
       // Generate clean username from address
       const username = `saver_${address.slice(2, 10)}`.toLowerCase();
       await authFetch(`${API_BASE}/api/users`, {
@@ -383,9 +427,22 @@ function App() {
           displayName: username,
         }),
       });
-      localStorage.setItem(`equilibria_user_${address}`, 'true');
     } catch (err) {
       console.error('Failed to register user:', err);
+    }
+  };
+
+  const loadUserProfile = async () => {
+    try {
+      const res = await authFetch(`${API_BASE}/api/users/${address.toLowerCase()}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.displayName) setDisplayName(data.displayName);
+      if (data.theme === 'light' || data.theme === 'dark') setTheme(data.theme);
+    } catch (err) {
+      console.warn('Failed to load user profile:', err);
+    } finally {
+      hasLoadedProfileRef.current = true;
     }
   };
 
@@ -427,19 +484,16 @@ function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+  }, [theme, address]);
+
+  useEffect(() => {
+    if (!address || !hasLoadedProfileRef.current) return;
+    authFetch(`${API_BASE}/api/users`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: address.toLowerCase(), theme }),
+    }).catch(err => console.warn('Failed to save theme:', err));
   }, [theme]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('equilibria_plans');
-    if (saved) { try { setPlans(JSON.parse(saved)); } catch (e) { console.error(e); } }
-    const savedTheme = localStorage.getItem('equilibria_theme');
-    if (savedTheme === 'light' || savedTheme === 'dark') setTheme(savedTheme as 'light' | 'dark');
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('equilibria_plans', JSON.stringify(plans));
-    localStorage.setItem('equilibria_theme', theme);
-  }, [plans, theme]);
 
   const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
 
@@ -471,8 +525,19 @@ function App() {
 
       if (!response.ok) {
         const err = await response.json();
-        console.warn('Backend vault create failed:', err.error);
-        // Still add locally even if backend fails
+        throw new Error(err.error || 'Failed to save plan to MongoDB');
+      }
+
+      if (newPlan.currentAmount > 0) {
+        await authFetch(`${API_BASE}/api/vaults/${newPlan.id}/deposit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            depositorAddress: address,
+            amount: newPlan.currentAmount,
+            txHash: newPlan.creationTxHash,
+          }),
+        });
       }
 
       if (newPlan.type === 'joint' && newPlan.partnerAddress) {
@@ -504,21 +569,8 @@ function App() {
       setActiveTab('dashboard');
     } catch (err) {
       console.error('Failed to add plan:', err);
-      // Still add locally as fallback
-      setPlans(prev => [...prev, newPlan]);
-      setShowCreateModal(false);
-      setActiveTab('dashboard');
-      addNotification('info', 'Plan created locally. Backend sync will retry.');
-      addRecentActivity({
-        id: `plan_${newPlan.id}`,
-        name: `Created "${newPlan.name}"`,
-        amount: newPlan.currentAmount,
-        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        icon: 'savings',
-        txHash: newPlan.creationTxHash,
-        chainId: newPlan.creationChainId,
-        chain: newPlan.chain,
-      });
+      addNotification('error', 'Plan creation failed to save to MongoDB. Please retry.');
+      throw err;
     }
   };
 
@@ -714,6 +766,7 @@ function App() {
                       walletBalances={walletBalances}
                       balancesLoading={balancesLoading}
                       recentActivity={recentActivity}
+                      displayName={displayName}
                     />
                   </div>
                 )}
@@ -805,6 +858,7 @@ function App() {
         <ReceiveModal
           onClose={() => setShowReceiveModal(false)}
           walletAddress={address}
+          displayName={displayName || 'User'}
           />
       )}
       {showCryptoReceiveModal && (
