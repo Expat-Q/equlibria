@@ -38,7 +38,7 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const hasLoadedRef = useRef(false);
   const embeddedWallet = wallets.find(w => (w as any).walletClientType === 'privy');
   const externalWallet = wallets.find(w => (w as any).walletClientType && (w as any).walletClientType !== 'privy');
-  const wallet = externalWallet || embeddedWallet || wallets.find(w => w.address?.startsWith('0x'));
+  const wallet = embeddedWallet || externalWallet || wallets.find(w => w.address?.startsWith('0x'));
   const address = wallet?.address ?? '';
 
   useEffect(() => {

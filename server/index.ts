@@ -1,3 +1,4 @@
+// Force tsx reload
 import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
@@ -48,7 +49,6 @@ const verifyWalletSignaturePayload = async (params: { address: string; signature
   const record = await AuthNonce.findOne({
     address,
     nonce: params.nonce,
-    usedAt: null,
     expiresAt: { $gt: new Date() },
   });
 
@@ -67,7 +67,6 @@ const verifyWalletSignaturePayload = async (params: { address: string; signature
     return { ok: false, error: 'Invalid signature' };
   }
 
-  await AuthNonce.updateOne({ _id: record._id }, { usedAt: new Date() });
   return { ok: true, address };
 };
 
@@ -89,28 +88,11 @@ const requireAuth = async (req: AuthedRequest, res: Response, next: NextFunction
       req.auth = payload;
       return next();
     } catch (err) {
-      // Fall through to wallet signature auth
+      return res.status(401).json({ error: 'Invalid auth token' });
     }
   }
 
-  const walletAddress = getHeaderValue(req, 'x-wallet-address');
-  const walletSignature = getHeaderValue(req, 'x-wallet-signature');
-  const walletNonce = getHeaderValue(req, 'x-wallet-nonce');
-
-  if (walletAddress && walletSignature && walletNonce) {
-    const result = await verifyWalletSignaturePayload({
-      address: walletAddress,
-      signature: walletSignature,
-      nonce: walletNonce,
-    });
-    if (result.ok && result.address) {
-      req.authUser = { address: result.address, privy_id: null };
-      return next();
-    }
-    return res.status(401).json({ error: result.error || 'Invalid wallet signature' });
-  }
-
-  return res.status(401).json({ error: token ? 'Invalid auth token' : 'Missing auth token' });
+  return res.status(401).json({ error: 'Missing auth token' });
 };
 
 const loadAuthUser = async (req: AuthedRequest) => {
