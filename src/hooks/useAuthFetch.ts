@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
 import { usePrivy, useWallets } from './privy';
-import { API_BASE } from '../services/api';
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
