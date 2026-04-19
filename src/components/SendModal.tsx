@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { parseEther, toHex } from 'viem';
 import { Icon } from './Icon';
 import baseLogo from '../assets/base_logo.jpg';
 import arbitrumLogo from '../assets/arbitrum_logo.jpg';
 import ethLogo from '../assets/eth_logo.jpg';
+import { useAuthFetch } from '../hooks/useAuthFetch';
+import { API_BASE } from '../services/api';
+import { TOKEN_IMAGES } from '../types';
 
 interface Props {
   onClose: () => void;
@@ -29,11 +32,15 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
+  const [resolvedUser, setResolvedUser] = useState('');
+  const [resolving, setResolving] = useState(false);
+  const [resolveErrorMsg, setResolveErrorMsg] = useState('');
+  const authFetch = useAuthFetch();
 
   const TOKENS = [
-    { symbol: 'USDC', icon: 'dollar-sign', color: '#2775ca' },
-    { symbol: 'ETH', icon: 'ethereum', color: '#627eea' },
-    { symbol: 'USDT', icon: 'dollar-sign', color: '#26a17b' },
+    { symbol: 'USDC', icon: 'dollar-sign', color: '#2775ca', image: TOKEN_IMAGES.USDC },
+    { symbol: 'ETH', icon: 'ethereum', color: '#627eea', image: TOKEN_IMAGES.ETH },
+    { symbol: 'USDT', icon: 'dollar-sign', color: '#26a17b', image: TOKEN_IMAGES.USDT },
   ];
 
   const CHAIN_META = [
@@ -50,6 +57,43 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
   
   const isEvmAddress = (value: string) => /^0x[a-fA-F0-9]{40}$/.test(value);
 
+
+  useEffect(() => {
+    const term = recipient.trim();
+    const isLikelyTag = term.length >= 3 && !isEvmAddress(term);
+    
+    if (isLikelyTag) {
+      setResolving(true);
+      setResolvedUser('');
+      setResolveErrorMsg('');
+      let ignore = false;
+      const timer = setTimeout(async () => {
+        try {
+          const res = await authFetch(`${API_BASE}/api/users/by-username/${term}`);
+          if (!res.ok) throw new Error();
+          const data = await res.json();
+          if (ignore) return;
+          setResolvedUser(data.displayName || data.username);
+        } catch(err) {
+          if (ignore) return;
+          setResolveErrorMsg(`Tag not found`);
+        } finally {
+          if (!ignore) {
+            setResolving(false);
+          }
+        }
+      }, 500);
+      return () => {
+        ignore = true;
+        clearTimeout(timer);
+      };
+    } else {
+      setResolving(false);
+      setResolvedUser('');
+      setResolveErrorMsg('');
+    }
+  }, [recipient]);
+
   const handleSend = async () => {
     const trimmedRecipient = recipient.trim();
     const amt = parseFloat(amount);
@@ -58,15 +102,26 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
       setError('Recipient is required');
       return;
     }
+
+    let finalRecipient = trimmedRecipient;
     if (trimmedRecipient.startsWith('@')) {
-      setError('Username send is not supported yet. Use a 0x address.');
+      try {
+        const res = await authFetch(`${API_BASE}/api/users/by-username/${trimmedRecipient}`);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        finalRecipient = data.address;
+        setResolvedUser(data.displayName || data.username);
+      } catch (err) {
+        setError(`User ${trimmedRecipient} not found.`);
+        return;
+      }
+    }
+
+    if (!isEvmAddress(finalRecipient)) {
+      setError('Enter a valid 0x address or valid reach tag');
       return;
     }
-    if (!isEvmAddress(trimmedRecipient)) {
-      setError('Enter a valid 0x address');
-      return;
-    }
-    if (wallet?.address && trimmedRecipient.toLowerCase() === wallet.address.toLowerCase()) {
+    if (wallet?.address && finalRecipient.toLowerCase() === wallet.address.toLowerCase()) {
       setError('Recipient cannot be your own address');
       return;
     }
@@ -112,7 +167,7 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
       if (tokenAddress === '0x0000000000000000000000000000000000000000') {
           // Native ETH transfer
           txParams = {
-            to: trimmedRecipient,
+            to: finalRecipient,
             data: '0x',
             value: toHex(parseEther(amount)),
             chainId: CHAIN_IDS[selectedChain]
@@ -120,7 +175,7 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
       } else {
           // ERC20 Transfer
           const fromWei = BigInt(Math.floor(parseFloat(amount) * 10 ** 6)).toString();
-          const toPadded = trimmedRecipient.replace('0x', '').padStart(64, '0');
+          const toPadded = finalRecipient.replace('0x', '').padStart(64, '0');
           const amountHex = BigInt(fromWei).toString(16).padStart(64, '0');
           const data = `0xa9059cbb${toPadded}${amountHex}`;
           txParams = {
@@ -240,6 +295,37 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
             {error}
           </div>
         )}
+        {resolving && !error && (
+          <div style={{
+            background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '0.5rem 1rem', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.4rem'
+          }}>
+            <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Searching target...
+          </div>
+        )}
+        {resolveErrorMsg && !error && !resolving && (
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 8, padding: '0.5rem 1rem', fontSize: '0.75rem', color: '#ef4444', marginBottom: '1rem'
+          }}>
+             {resolveErrorMsg}
+          </div>
+        )}
+        
+        {resolvedUser && !error && !resolving && (
+          <div 
+             onClick={() => {
+                // Focus the amount input if it exists, or just indicate success
+                const amtInput = document.getElementById('amount-input');
+                if (amtInput) amtInput.focus();
+             }}
+             style={{
+               background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: 8, padding: '0.5rem 1rem', fontSize: '0.75rem', color: 'var(--success)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', transition: 'background 0.2s'
+             }}
+             onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'}
+             onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.1)'}
+          >
+            <Icon name="check_circle" size={14} /> Resolved to <strong>{resolvedUser}</strong>
+          </div>
+        )}
 
         {/* Amount Input */}
         <div className="form-section">
@@ -249,6 +335,7 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
           </label>
           <div style={{ position: 'relative' }}>
             <input
+              id="amount-input"
               className="form-input"
               type="number"
               placeholder="0.00"
@@ -329,7 +416,11 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
                   transition: 'all 0.2s ease'
                 }}
               >
-                <Icon name={token.icon} size={20} color={token.color} />
+                {token.image ? (
+                   <img src={token.image} alt={token.symbol} style={{ width: 20, height: 20, borderRadius: '50%' }} />
+                ) : (
+                   <Icon name={token.icon} size={20} color={token.color} />
+                )}
                 <div style={{ textAlign: 'left' }}>
                   <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                     {token.symbol}

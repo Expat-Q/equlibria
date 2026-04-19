@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Icon } from './Icon';
 import type { SavingsPlan } from '../types';
-import { CATEGORIES } from '../types';
+import { CATEGORIES, TOKEN_IMAGES } from '../types';
 import { useCurrency } from '../context/CurrencyContext';
 
 interface Props {
@@ -45,7 +45,7 @@ export function Dashboard({ plans, onCreatePlan, onSelectPlan, onGoToPlans, onGo
     Arbitrum: 'arbitrum',
   };
 
-  const HOLDINGS: Record<'Ethereum' | 'Base' | 'Arbitrum', { token: string; amount: number; price: number; color: string }[]> = {
+  const HOLDINGS: Record<'Ethereum' | 'Base' | 'Arbitrum', { token: string; amount: number; price: number; color: string; yieldPercent?: number }[]> = {
     Ethereum: [],
     Base: [],
     Arbitrum: [],
@@ -61,6 +61,22 @@ export function Dashboard({ plans, onCreatePlan, onSelectPlan, onGoToPlans, onGo
         price: row.balance > 0 ? row.usdValue / row.balance : 0,
         color: tokenColors[row.token] || '#94a3b8',
       }));
+
+      // Inject Vault active plans into the holdings list too
+      const chainPlans = plans.filter(p => p.chain === chainKey && p.currentAmount > 0);
+      for (const p of chainPlans) {
+        // Find existing price per token
+        const match = walletBalances.find(b => b.chain === chainKey && b.token === p.token);
+        const refPrice = match && match.balance > 0 ? (match.usdValue / match.balance) : 1;
+        
+        HOLDINGS[chain].push({
+          token: p.defiVaultName || p.name,
+          amount: p.currentAmount,
+          price: refPrice,
+          color: p.type === 'joint' ? '#a78bfa' : '#f5ac37',
+          yieldPercent: p.depositToDefi ? (p.apy || 0.01) : undefined
+        });
+      }
     }
   }
 
@@ -248,12 +264,25 @@ export function Dashboard({ plans, onCreatePlan, onSelectPlan, onGoToPlans, onGo
                 {HOLDINGS[selectedChain].map(h => (
                   <div key={h.token} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: h.color }} />
-                      <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', fontWeight: 600 }}>{h.token}</span>
+                      {TOKEN_IMAGES[h.token] ? (
+                        <div style={{ width: 14, height: 14, borderRadius: '50%', overflow: 'hidden' }}>
+                          <img src={TOKEN_IMAGES[h.token]} alt={h.token} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+                      ) : (
+                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: h.color }} />
+                      )}
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.82rem', fontWeight: 600 }}>{h.token}</div>
+                        <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.72rem', fontWeight: 600 }}>{h.amount.toLocaleString(undefined, { maximumFractionDigits: 5 })}</div>
+                      </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ color: 'white', fontSize: '0.85rem', fontWeight: 700 }}>{h.amount} {h.token}</div>
-                      <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.72rem' }}>${(h.amount * h.price).toLocaleString()}</div>
+                      <div style={{ color: 'white', fontSize: '0.85rem', fontWeight: 700 }}>${(h.amount * h.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      {h.yieldPercent !== undefined ? (
+                        <div style={{ color: 'var(--success)', fontSize: '0.72rem', fontWeight: 600 }}>+{h.yieldPercent.toFixed(2)}%</div>
+                      ) : (
+                        <div style={{ color: 'transparent', fontSize: '0.72rem' }}>-</div>
+                      )}
                     </div>
                   </div>
                 ))}

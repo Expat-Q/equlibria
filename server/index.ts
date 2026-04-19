@@ -312,6 +312,24 @@ const NotificationSchema = new mongoose.Schema({
 NotificationSchema.index({ userAddress: 1, createdAt: -1 });
 const Notification = mongoose.model('Notification', NotificationSchema);
 
+// Draft plan for users creating vaults but closing prematurely
+const DraftPlanSchema = new mongoose.Schema({
+  userAddress: { type: String, required: true, index: true },
+  data: { type: Object, default: {} },
+  updatedAt: { type: Date, default: Date.now },
+});
+const DraftPlan = mongoose.model('DraftPlan', DraftPlanSchema);
+
+// Fiat topups (Manual Bank Transfer Logging)
+const FiatTopUpSchema = new mongoose.Schema({
+  userAddress: { type: String, required: true, index: true },
+  amount: { type: Number, required: true },
+  referenceId: { type: String, default: '' },
+  status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+  createdAt: { type: Date, default: Date.now },
+});
+const FiatTopUp = mongoose.model('FiatTopUp', FiatTopUpSchema);
+
 // (Demo models and memory fallbacks removed — production mode only)
 
 // ── Privy Signer (lazy init to avoid crash if keys not set) ────
@@ -565,6 +583,28 @@ app.get('/api/users/search', async (req, res) => {
         displayName: u.displayName,
         avatar: u.avatar,
       })),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/users/by-username/:username - Exact lookup for resolving @tags to addresses
+app.get('/api/users/by-username/:username', async (req, res) => {
+  const username = req.params.username.replace(/^@/, '').toLowerCase();
+  try {
+    if (!isDbConnected) {
+      if (username === 'vitalik') return res.json({ address: '0x1A2b3C4d5E6F7890aB1c2D3e4F5A6b7C8D9e0F12', username: 'vitalik' });
+      return res.status(404).json({ error: 'User not found in mock DB' });
+    }
+    const user = await User.findOne({ username });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    
+    return res.json({
+      address: user.address,
+      username: user.username,
+      displayName: user.displayName,
+      avatar: user.avatar,
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -941,10 +981,11 @@ app.get('/api/vaults/:address', requireAuth, async (req: AuthedRequest, res) => 
     const authErr = await ensureUserMatchesAddress(req, res, req.params.address);
     if (authErr) return authErr;
 
+    const addressRegex = new RegExp(`^${req.params.address}$`, 'i');
     const vaults = await Vault.find({
       $or: [
-        { creatorAddress: req.params.address },
-        { partnerAddress: req.params.address },
+        { creatorAddress: addressRegex },
+        { partnerAddress: addressRegex },
       ],
     });
     return res.json({ vaults });
@@ -1672,6 +1713,77 @@ app.post('/api/vaults/:planId/deposit', requireAuth, async (req: AuthedRequest, 
       pointsEarned,
       totalPoints: user?.tokenPoints || 0,
     });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DRAFT PLANS & FIAT ON-RAMP ROUTES ────────────────────────
+
+// GET /api/user/draft-plan/:address
+app.get('/api/user/draft-plan/:address', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const authErr = await ensureUserMatchesAddress(req, res, req.params.address);
+    if (authErr) return authErr;
+
+    const draft = await DraftPlan.findOne({ userAddress: req.params.address.toLowerCase() });
+    return res.json({ draft: draft?.data || null });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/user/draft-plan
+app.patch('/api/user/draft-plan', requireAuth, async (req: AuthedRequest, res) => {
+  const { userAddress, data } = req.body;
+  if (!userAddress) return res.status(400).json({ error: 'userAddress required' });
+
+  const authErr = await ensureUserMatchesAddress(req, res, userAddress);
+  if (authErr) return authErr;
+
+  try {
+    if (!data || Object.keys(data).length === 0) {
+      await DraftPlan.deleteOne({ userAddress: userAddress.toLowerCase() });
+      return res.json({ success: true, deleted: true });
+    }
+
+    const draft = await DraftPlan.findOneAndUpdate(
+      { userAddress: userAddress.toLowerCase() },
+      { data, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    return res.json({ draft });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/fiat-topups
+app.post('/api/fiat-topups', requireAuth, async (req: AuthedRequest, res) => {
+  const { userAddress, amount, referenceId } = req.body;
+  
+  if (!userAddress || !amount) {
+    return res.status(400).json({ error: 'userAddress and amount required' });
+  }
+
+  const authErr = await ensureUserMatchesAddress(req, res, userAddress);
+  if (authErr) return authErr;
+
+  try {
+    const topUp = await FiatTopUp.create({
+      userAddress: userAddress.toLowerCase(),
+      amount,
+      referenceId: referenceId || '',
+    });
+    
+    // Create an incoming user notification
+    await Notification.create({
+      userAddress: userAddress.toLowerCase(),
+      type: 'info',
+      message: `Bank transfer of $${amount} logged. Awaiting approval.`,
+    });
+
+    return res.status(201).json({ topUp });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

@@ -40,8 +40,20 @@ export function TourGuide() {
         if (!res.ok) return;
         const data = await res.json();
         if (!data.hasSeenTour) {
-          const timer = setTimeout(() => setRun(true), 1200);
-          return () => clearTimeout(timer);
+          // Only show tour if account was created in the last 2 hours
+          const isNewAccount = data.createdAt && (Date.now() - new Date(data.createdAt).getTime() < 2 * 60 * 60 * 1000);
+          
+          if (isNewAccount) {
+            const timer = setTimeout(() => setRun(true), 1200);
+            return () => clearTimeout(timer);
+          } else {
+            // Silently mark as seen for existing legacy users
+            authFetch(`${API_BASE}/api/users`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ address: address.toLowerCase(), hasSeenTour: true }),
+            }).catch(() => {});
+          }
         }
       } catch (err) {
         console.warn('Failed to load tour state:', err);

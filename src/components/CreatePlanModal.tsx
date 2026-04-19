@@ -38,8 +38,9 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
   const [token, setToken] = useState<TokenSymbol>('USDC');
   const [target, setTarget] = useState(''); // We'll keep the state variable but repurpose it functionally as depositAmount
   const [partnerAddress, setPartnerAddress] = useState('');
-  
-  // New Fields
+  const [partnerResolving, setPartnerResolving] = useState(false);
+  const [partnerResolvedUser, setPartnerResolvedUser] = useState('');
+  const [partnerResolveError, setPartnerResolveError] = useState('');
   const [lockDurationDays, setLockDurationDays] = useState<number>(30);
   const [depositToDefi, setDepositToDefi] = useState<boolean>(true);
   const [policyAgreed, setPolicyAgreed] = useState<boolean>(false);
@@ -56,6 +57,85 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
     base: 8453,
     arbitrum: 42161,
   };
+
+
+  useEffect(() => {
+    const term = partnerAddress.trim();
+    const isLikelyTag = term.length >= 3 && !isEvmAddress(partnerAddress);
+
+    if (isLikelyTag) {
+      setPartnerResolving(true);
+      setPartnerResolvedUser('');
+      setPartnerResolveError('');
+      let ignore = false;
+      const timer = setTimeout(async () => {
+        try {
+          const res = await authFetch(`${API_BASE}/api/users/by-username/${term}`);
+          if (!res.ok) throw new Error();
+          const data = await res.json();
+          if (ignore) return;
+          setPartnerResolvedUser(data.displayName || data.username);
+        } catch(err) {
+          if (ignore) return;
+          setPartnerResolveError(`Tag not found`);
+        } finally {
+          if (!ignore) {
+            setPartnerResolving(false);
+          }
+        }
+      }, 500);
+      return () => {
+        ignore = true;
+        clearTimeout(timer);
+      };
+    } else {
+      setPartnerResolving(false);
+      setPartnerResolvedUser('');
+      setPartnerResolveError('');
+    }
+  }, [partnerAddress]);
+
+  useEffect(() => {
+    if (!walletAddress) return;
+    const fetchDraft = async () => {
+      try {
+        const res = await authFetch(`${API_BASE}/api/user/draft-plan/${walletAddress}`);
+        if (res.ok) {
+          const { draft } = await res.json();
+          if (draft && Object.keys(draft).length > 0) {
+            if (draft.step) setStep(draft.step);
+            if (draft.planType) setPlanType(draft.planType);
+            if (draft.category) setCategory(draft.category);
+            if (draft.chain) setChain(draft.chain);
+            if (draft.name) setName(draft.name);
+            if (draft.token) setToken(draft.token);
+            if (draft.target) setTarget(draft.target);
+            if (draft.partnerAddress) setPartnerAddress(draft.partnerAddress);
+            if (draft.lockDurationDays) setLockDurationDays(draft.lockDurationDays);
+            if (draft.depositToDefi !== undefined) setDepositToDefi(draft.depositToDefi);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch draft plan:', err);
+      }
+    };
+    fetchDraft();
+  }, [walletAddress]);
+
+  // Auto-save draft
+  useEffect(() => {
+    if (!walletAddress) return;
+    const saveTimer = setTimeout(() => {
+      if (step === 'success') return; // Don't save if successful
+      const data = { step, planType, category, chain, name, token, target, partnerAddress, lockDurationDays, depositToDefi };
+      authFetch(`${API_BASE}/api/user/draft-plan`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userAddress: walletAddress, data }),
+      }).catch(err => console.warn('Failed to auto-save draft:', err));
+    }, 1000); // 1-second debounce
+    return () => clearTimeout(saveTimer);
+  }, [walletAddress, step, planType, category, chain, name, token, target, partnerAddress, lockDurationDays, depositToDefi]);
 
   // Fetch live APY from best vault
   useEffect(() => {
@@ -127,15 +207,28 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
         throw new Error('Vault name is required');
       }
 
-      if (planType === 'joint' && !partnerAddress) {
+      let finalPartnerAddress = partnerAddress?.trim() || '';
+
+      if (planType === 'joint' && !finalPartnerAddress) {
         throw new Error('Select a partner for a joint vault');
       }
 
-      if (planType === 'joint' && !isEvmAddress(partnerAddress)) {
-        throw new Error('Enter a valid partner wallet address');
+      if (planType === 'joint' && finalPartnerAddress.startsWith('@')) {
+        try {
+          const res = await authFetch(`${API_BASE}/api/users/by-username/${finalPartnerAddress}`);
+          if (!res.ok) throw new Error();
+          const data = await res.json();
+          finalPartnerAddress = data.address;
+        } catch (err) {
+          throw new Error(`User ${finalPartnerAddress} not found.`);
+        }
       }
 
-      if (walletAddress && partnerAddress && walletAddress.toLowerCase() === partnerAddress.toLowerCase()) {
+      if (planType === 'joint' && !isEvmAddress(finalPartnerAddress)) {
+        throw new Error('Enter a valid partner wallet address or reach tag');
+      }
+
+      if (walletAddress && finalPartnerAddress && walletAddress.toLowerCase() === finalPartnerAddress.toLowerCase()) {
         throw new Error('Partner address must be different from your address');
       }
 
@@ -215,7 +308,7 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
         defiVaultName,
         defiChainId,
         defiVaultAddress,
-        partnerAddress: planType === 'joint' ? partnerAddress : undefined,
+        partnerAddress: planType === 'joint' ? finalPartnerAddress : undefined,
         isPartnerAccepted: planType === 'joint' ? false : undefined,
         creationTxHash,
         creationChainId,
@@ -237,6 +330,13 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
            headers: { 'Content-Type': 'application/json' },
            body: JSON.stringify({ points: depositAmount * 10, reason: 'Initial Deposit', address: walletAddress }),
         }).catch(err => console.error('Failed to reward points for deposit:', err));
+
+        // Clear draft from database
+        authFetch(`${API_BASE}/api/user/draft-plan`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userAddress: walletAddress, data: null }),
+        }).catch(() => {});
       }
       
       setStep('success');
@@ -430,7 +530,9 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
                     style={{ '--tok-color': tok.color } as React.CSSProperties}
                     onClick={() => setToken(tok.symbol)}
                   >
-                    <span>{tok.icon}</span>
+                    <span style={{ display: 'flex', alignItems: 'center' }}>
+                      {tok.image ? <img src={tok.image} alt={tok.symbol} style={{ width: 16, height: 16, borderRadius: '50%' }} /> : tok.icon}
+                    </span>
                     <span>{tok.symbol}</span>
                   </div>
                 ))}
@@ -542,13 +644,38 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
             <label className="form-label" style={{ fontSize: '0.85rem' }}>Partner Wallet Address</label>
             <input
               className="form-input"
-              placeholder="0x..."
+              placeholder="0x... or username"
               value={partnerAddress}
               onChange={e => setPartnerAddress(e.target.value.trim())}
             />
-            {partnerAddress && !isEvmAddress(partnerAddress) && (
+            {partnerAddress && !isEvmAddress(partnerAddress) && !partnerResolving && !partnerResolvedUser && !partnerResolveError && (
               <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--danger)' }}>
-                Enter a valid 0x address
+                Enter a valid 0x address or username
+              </div>
+            )}
+            {partnerResolving && (
+              <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Searching target...
+              </div>
+            )}
+            {partnerResolveError && !partnerResolving && (
+              <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--danger)' }}>
+                {partnerResolveError}
+              </div>
+            )}
+            {partnerResolvedUser && !partnerResolving && (
+              <div 
+                 onClick={() => {
+                    const confirmBtn = document.getElementById('step-partner-next');
+                    if (confirmBtn) confirmBtn.focus();
+                 }}
+                 style={{
+                   marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: 8, padding: '0.5rem 1rem', transition: 'background 0.2s'
+                 }}
+                 onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'}
+                 onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.1)'}
+              >
+                <Icon name="check_circle" size={14} /> Resolved to <strong>{partnerResolvedUser}</strong>
               </div>
             )}
             <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
@@ -677,6 +804,7 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
               </div>
             ) : (
               <button
+                id="step-partner-next"
                 className="btn-primary"
                 style={{ flex: 1, background: 'var(--accent-primary)', color: 'white', border: 'none' }}
                 onClick={() => setStep(steps[stepIndex + 1])}

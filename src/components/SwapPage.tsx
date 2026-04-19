@@ -2,13 +2,19 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Icon } from './Icon';
 import type { SavingsPlan } from '../types';
 import { API_BASE } from '../services/api';
+import { useCurrency } from '../context/CurrencyContext';
+import { TOKEN_IMAGES } from '../types';
 
-type SwapToken = 'ETH' | 'USDC' | 'USDT';
+type SwapToken = string;
 
-const SWAP_TOKENS: { symbol: SwapToken; name: string; color: string }[] = [
-  { symbol: 'ETH',  name: 'Ethereum',  color: '#627eea' },
-  { symbol: 'USDC', name: 'USD Coin',  color: '#2775ca' },
-  { symbol: 'USDT', name: 'Tether USD', color: '#26a17b' },
+const SWAP_TOKENS: { symbol: SwapToken; name: string; color: string; icon: string; image?: string }[] = [
+  { symbol: 'ETH',  name: 'Ethereum',  color: '#627eea', icon: '🔷', image: TOKEN_IMAGES.ETH },
+  { symbol: 'USDC', name: 'USD Coin',  color: '#2775ca', icon: '🔵', image: TOKEN_IMAGES.USDC },
+  { symbol: 'USDT', name: 'Tether USD', color: '#26a17b', icon: '💵', image: TOKEN_IMAGES.USDT },
+  { symbol: 'WBTC', name: 'Wrapped BTC', color: '#f7931a', icon: '🔶' },
+  { symbol: 'DAI',  name: 'Dai Stablecoin', color: '#f5ac37', icon: '🟡' },
+  { symbol: 'USDe', name: 'Ethena USDe', color: '#000000', icon: '💠' },
+  { symbol: 'LINK', name: 'Chainlink', color: '#2a5ada', icon: '🔗' },
 ];
 
 // Fallback rates for instant display when API hasn't responded yet
@@ -48,6 +54,33 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
   const [swapExplorerUrl, setSwapExplorerUrl] = useState('');
   const [selectedChain, setSelectedChain] = useState<'Ethereum' | 'Base' | 'Arbitrum'>('Base');
 
+  const { getSymbol } = useCurrency();
+  const [dynamicSwapTokens, setDynamicSwapTokens] = useState<{ symbol: string; name: string; color: string; icon: string; image?: string }[]>(SWAP_TOKENS as any);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/earn/supported-tokens`)
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          const additions = data
+            .filter(sym => !SWAP_TOKENS.find(t => t.symbol === sym))
+            .map(sym => ({ symbol: sym, name: sym, color: '#a78bfa', icon: '💎' }));
+          if (additions.length > 0) setDynamicSwapTokens([...SWAP_TOKENS as any, ...additions]);
+        }
+      })
+      .catch(err => console.error('Failed to augment swap tokens:', err));
+  }, []);
+
+  // Helper for USD price interpolation
+  const getApproxUsdPrice = (t: SwapToken) => {
+    switch (t) {
+      case 'ETH': return 3412.5;
+      case 'WBTC': return 65000;
+      case 'LINK': return 20;
+      default: return 1;
+    }
+  };
+
   const chainKeyMap: Record<string, string> = {
     Ethereum: 'ethereum',
     Base: 'base',
@@ -61,6 +94,10 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
 
   const rateKey = `${fromToken}-${toToken}`;
   const rate = liveRate ?? FALLBACK_RATES[rateKey] ?? 1;
+
+  const parsedInput = parseFloat(fromAmt) || 0;
+  const fromPriceInUSD = getApproxUsdPrice(fromToken);
+  
   const toAmt = fromAmt ? (parseFloat(fromAmt) * rate).toFixed(6) : '';
 
   // Fetch a live rate when the token pair or amount changes
@@ -119,11 +156,12 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
     setToToken(fromToken);
     setFromAmt(toAmt);
     setLiveRate(null);
+    setFiatMode(false); // Reset fiat mode on flip for simplicity
   };
 
   const handleSwap = async () => {
-    if (!fromAmt || parseFloat(fromAmt) <= 0) return;
-    if (parseFloat(fromAmt) > fromBalance) {
+    if (!effectiveCryptoAmt || parseFloat(effectiveCryptoAmt) <= 0) return;
+    if (parseFloat(effectiveCryptoAmt) > fromBalance) {
       setSwapError('Insufficient balance for this swap.');
       return;
     }
@@ -140,7 +178,7 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
           _wallet,
           fromToken as any,
           toToken as any,
-          fromAmt,
+          effectiveCryptoAmt,
           currentChainKey as any,
           slippage / 100
       );
@@ -148,7 +186,7 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
       setSwapTxHash(result.txHash);
       setSwapExplorerUrl(result.explorerUrl || '');
 
-      onSwapComplete?.(result.txHash, currentChainKey, fromToken, toToken, parseFloat(fromAmt));
+      onSwapComplete?.(result.txHash, currentChainKey, fromToken, toToken, parseFloat(effectiveCryptoAmt));
 
 
       setSwapping(false);
@@ -196,7 +234,12 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
             minWidth: '100px', fontFamily: 'var(--font)',
           }}
         >
-          {value}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+             {TOKEN_IMAGES[value] && (
+               <img src={TOKEN_IMAGES[value]} alt={value} style={{ width: 16, height: 16, borderRadius: '50%' }} />
+             )}
+             {value}
+          </div>
           <Icon name="expand_more" size={16} color="var(--text-muted)" />
         </button>
 
@@ -207,18 +250,24 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
               borderRadius: '8px', zIndex: 100, overflow: 'hidden',
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
            }}>
-             {SWAP_TOKENS.filter(t => t.symbol !== exclude).map(t => (
+             {dynamicSwapTokens.filter(t => t.symbol !== exclude).map(t => (
                <div
                  key={t.symbol}
                  onClick={() => { onChange(t.symbol); setOpen(false); }}
                  style={{
                    padding: '0.65rem 0.85rem', cursor: 'pointer',
                    fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)',
-                   transition: 'background 0.15s ease'
+                   transition: 'background 0.15s ease',
+                   display: 'flex', alignItems: 'center', gap: '0.5rem'
                  }}
                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-input)'}
                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                >
+                 {t.image ? (
+                    <img src={t.image} alt={t.symbol} style={{ width: 14, height: 14, borderRadius: '50%' }} />
+                 ) : (
+                    <span>{t.icon}</span>
+                 )}
                  {t.symbol}
                </div>
              ))}
@@ -262,22 +311,33 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
         <div style={{ background: 'var(--bg-input)', borderRadius: '12px', padding: '1rem 1.1rem', marginBottom: '0.4rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>You Pay</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               Available: <strong style={{ color: 'var(--text-primary)' }}>{fromBalance.toLocaleString()} {fromToken}</strong>
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <input
-              type="number"
-              value={fromAmt}
-              onChange={e => setFromAmt(e.target.value)}
-              placeholder="0.00"
-              style={{
-                flex: 1, background: 'transparent', border: 'none',
-                fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)',
-                outline: 'none', minWidth: 0, fontFamily: 'var(--font)',
-              }}
-            />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <input
+                  type="number"
+                  value={fromAmt}
+                  onChange={e => setFromAmt(e.target.value)}
+                  placeholder="0.00"
+                  style={{
+                    width: '100%', background: 'transparent', border: 'none',
+                    fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)',
+                    outline: 'none', minWidth: 0, fontFamily: 'var(--font)',
+                  }}
+                />
+              </div>
+              {parsedInput > 0 && (
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                  ≈ {getSymbol()}{(parsedInput * fromPriceInUSD * convert(1)).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </span>
+              )}
+            </div>
             {isDemo && fromBalance > 0 && (
                <button 
                  onClick={() => setFromAmt(fromBalance.toString())}
