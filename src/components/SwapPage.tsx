@@ -54,7 +54,7 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
   const [swapExplorerUrl, setSwapExplorerUrl] = useState('');
   const [selectedChain, setSelectedChain] = useState<'Ethereum' | 'Base' | 'Arbitrum'>('Base');
 
-  const { getSymbol } = useCurrency();
+  const { getSymbol, convert } = useCurrency();
   const [dynamicSwapTokens, setDynamicSwapTokens] = useState<{ symbol: string; name: string; color: string; icon: string; image?: string }[]>(SWAP_TOKENS as any);
 
   useEffect(() => {
@@ -156,12 +156,11 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
     setToToken(fromToken);
     setFromAmt(toAmt);
     setLiveRate(null);
-    setFiatMode(false); // Reset fiat mode on flip for simplicity
   };
 
   const handleSwap = async () => {
-    if (!effectiveCryptoAmt || parseFloat(effectiveCryptoAmt) <= 0) return;
-    if (parseFloat(effectiveCryptoAmt) > fromBalance) {
+    if (!fromAmt || parseFloat(fromAmt) <= 0) return;
+    if (parseFloat(fromAmt) > fromBalance) {
       setSwapError('Insufficient balance for this swap.');
       return;
     }
@@ -178,7 +177,7 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
           _wallet,
           fromToken as any,
           toToken as any,
-          effectiveCryptoAmt,
+          fromAmt,
           currentChainKey as any,
           slippage / 100
       );
@@ -186,7 +185,7 @@ export function SwapPage({ plans: _plans, wallet: _wallet, isDemo, walletBalance
       setSwapTxHash(result.txHash);
       setSwapExplorerUrl(result.explorerUrl || '');
 
-      onSwapComplete?.(result.txHash, currentChainKey, fromToken, toToken, parseFloat(effectiveCryptoAmt));
+      onSwapComplete?.(result.txHash, currentChainKey, fromToken, toToken, parseFloat(fromAmt));
 
 
       setSwapping(false);
