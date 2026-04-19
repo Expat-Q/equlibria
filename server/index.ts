@@ -20,7 +20,7 @@ app.use(cors());
 app.use(express.json());
 
 const PRIVY_APP_ID = process.env.PRIVY_APP_ID || '';
-const PRIVY_VERIFICATION_KEY = process.env.PRIVY_VERIFICATION_KEY || '';
+const PRIVY_VERIFICATION_KEY = (process.env.PRIVY_VERIFICATION_KEY || '').replace(/\\n/g, '\n');
 
 const WALLET_AUTH_TTL_MINUTES = 10;
 const WALLET_AUTH_MESSAGE_PREFIX = 'Equilibria Vault login';
@@ -87,8 +87,9 @@ const requireAuth = async (req: AuthedRequest, res: Response, next: NextFunction
       });
       req.auth = payload;
       return next();
-    } catch (err) {
-      return res.status(401).json({ error: 'Invalid auth token' });
+    } catch (err: any) {
+      console.warn('Auth token verification failed:', err?.message || err);
+      return res.status(401).json({ error: 'Invalid auth token', details: err?.message });
     }
   }
 
