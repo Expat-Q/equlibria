@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Icon } from './Icon';
-import { useWallets } from '../hooks/privy';
+import { useWallets, usePrivy } from '../hooks/privy';
 import { useAuthFetch } from '../hooks/useAuthFetch';
 import { API_BASE } from '../services/api';
 
@@ -8,6 +8,7 @@ type SettingsTab = 'profile' | 'wallet' | 'social';
 
 export function WalletManager({ onClose }: { onClose?: () => void }) {
   const { wallets } = useWallets();
+  const { exportWallet } = usePrivy();
   const authFetch = useAuthFetch();
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
   const [copied, setCopied] = useState(false);
@@ -16,7 +17,6 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
   const [email, setEmail] = useState('');
   const [savedOk, setSavedOk] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [mockMode, setMockMode] = useState(false);
   const [privateKeyInput, setPrivateKeyInput] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   const [storedKey, setStoredKey] = useState(() => localStorage.getItem('equilibria_imported_pk') || '');
@@ -40,7 +40,6 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
           if (data.displayName) setDisplayName(data.displayName);
           if (data.username) setReachTag(data.username);
           if (data.email) setEmail(data.email);
-          if (typeof data.mockMode === 'boolean') setMockMode(data.mockMode);
         }
       } catch (err) {
         console.warn('Failed to load profile from backend');
@@ -281,35 +280,7 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
                   <Icon name="security" size={18} color="var(--text-muted)" />
                   <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)' }}>Provider</span>
                 </div>
-                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>Starknet Demo (Mock)</span>
-              </div>
-              <div style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '0.75rem 1rem', background: 'var(--bg-input)', borderRadius: '10px',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <Icon name="science" size={18} color="var(--accent-primary)" />
-                  <div>
-                    <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)', display: 'block' }}>Demo Mode (Mock Exec)</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Simulate real tx without spending funds</span>
-                  </div>
-                </div>
-                <label className="switch">
-                  <input 
-                    type="checkbox" 
-                    checked={mockMode}
-                    onChange={(e) => {
-                      const next = e.target.checked;
-                      setMockMode(next);
-                      authFetch(`${API_BASE}/api/users`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ address: address.toLowerCase(), mockMode: next }),
-                      }).catch(err => console.warn('Failed to save mock mode:', err));
-                    }} 
-                  />
-                  <span className="slider round"></span>
-                </label>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)' }}>LI.FI</span>
               </div>
             </div>
           </div>
@@ -355,14 +326,24 @@ export function WalletManager({ onClose }: { onClose?: () => void }) {
             >
               <Icon name="key" size={16} /> {keySaved ? 'Imported' : 'Import Key'}
             </button>
-            <button
-              className="btn-white"
-              onClick={exportPrivateKey}
-              style={{ width: '100%', marginTop: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 700, color: '#111827' }}
-              disabled={!storedKey}
-            >
-              <Icon name="content_copy" size={16} /> {copied ? 'Copied' : 'Export Imported Key'}
-            </button>
+            {isPrivyEmbedded ? (
+              <button
+                className="btn-white"
+                onClick={() => exportWallet()}
+                style={{ width: '100%', marginTop: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 700, color: '#111827' }}
+              >
+                <Icon name="key" size={16} /> Export Private Key
+              </button>
+            ) : (
+              <button
+                className="btn-white"
+                onClick={exportPrivateKey}
+                style={{ width: '100%', marginTop: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 700, color: '#111827' }}
+                disabled={!storedKey}
+              >
+                <Icon name="content_copy" size={16} /> {copied ? 'Copied' : 'Export Imported Key'}
+              </button>
+            )}
           </div>
         </div>
       )}

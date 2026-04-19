@@ -40,6 +40,7 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
   const [partnerAddress, setPartnerAddress] = useState('');
   const [partnerResolving, setPartnerResolving] = useState(false);
   const [partnerResolvedUser, setPartnerResolvedUser] = useState('');
+  const [partnerResolvedAddress, setPartnerResolvedAddress] = useState('');
   const [partnerResolveError, setPartnerResolveError] = useState('');
   const [lockDurationDays, setLockDurationDays] = useState<number>(30);
   const [depositToDefi, setDepositToDefi] = useState<boolean>(true);
@@ -75,9 +76,11 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
           const data = await res.json();
           if (ignore) return;
           setPartnerResolvedUser(data.displayName || data.username);
+          setPartnerResolvedAddress(data.address);
         } catch(err) {
           if (ignore) return;
           setPartnerResolveError(`Tag not found`);
+          setPartnerResolvedAddress('');
         } finally {
           if (!ignore) {
             setPartnerResolving(false);
@@ -91,6 +94,7 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
     } else {
       setPartnerResolving(false);
       setPartnerResolvedUser('');
+      setPartnerResolvedAddress('');
       setPartnerResolveError('');
     }
   }, [partnerAddress]);
@@ -213,14 +217,18 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
         throw new Error('Select a partner for a joint vault');
       }
 
-      if (planType === 'joint' && finalPartnerAddress.startsWith('@')) {
-        try {
-          const res = await authFetch(`${API_BASE}/api/users/by-username/${finalPartnerAddress}`);
-          if (!res.ok) throw new Error();
-          const data = await res.json();
-          finalPartnerAddress = data.address;
-        } catch (err) {
-          throw new Error(`User ${finalPartnerAddress} not found.`);
+      if (planType === 'joint') {
+        if (!isEvmAddress(finalPartnerAddress) && partnerResolvedAddress) {
+          finalPartnerAddress = partnerResolvedAddress;
+        } else if (finalPartnerAddress.startsWith('@')) {
+          try {
+            const res = await authFetch(`${API_BASE}/api/users/by-username/${finalPartnerAddress}`);
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            finalPartnerAddress = data.address;
+          } catch (err) {
+            throw new Error(`User ${finalPartnerAddress} not found.`);
+          }
         }
       }
 
@@ -562,7 +570,11 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
                   placeholder="e.g. 100"
                   min="1"
                   value={target}
-                  onChange={e => setTarget(e.target.value)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (val.includes('-')) return;
+                    setTarget(val);
+                  }}
                   style={{ paddingRight: '3.5rem' }}
                 />
                 <span style={{ position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontWeight: 700, fontSize: '0.9rem' }}>
@@ -811,7 +823,7 @@ export function CreatePlanModal({ onClose, onCreated, walletBalances, walletAddr
                 disabled={
                   (step === 'details' && (!name.trim() || !target || parseFloat(target) <= 0)) ||
                   (step === 'details' && hasInsufficientBalance) ||
-                  (step === 'partner' && (!partnerAddress || !isEvmAddress(partnerAddress)))
+                  (step === 'partner' && (!partnerAddress || (!isEvmAddress(partnerAddress) && !partnerResolvedAddress)))
                 }
               >
                 Next

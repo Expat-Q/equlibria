@@ -33,6 +33,7 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
   const [resolvedUser, setResolvedUser] = useState('');
+  const [resolvedAddress, setResolvedAddress] = useState('');
   const [resolving, setResolving] = useState(false);
   const [resolveErrorMsg, setResolveErrorMsg] = useState('');
   const authFetch = useAuthFetch();
@@ -74,9 +75,11 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
           const data = await res.json();
           if (ignore) return;
           setResolvedUser(data.displayName || data.username);
+          setResolvedAddress(data.address);
         } catch(err) {
           if (ignore) return;
           setResolveErrorMsg(`Tag not found`);
+          setResolvedAddress('');
         } finally {
           if (!ignore) {
             setResolving(false);
@@ -87,9 +90,9 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
         ignore = true;
         clearTimeout(timer);
       };
-    } else {
       setResolving(false);
       setResolvedUser('');
+      setResolvedAddress('');
       setResolveErrorMsg('');
     }
   }, [recipient]);
@@ -104,7 +107,10 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
     }
 
     let finalRecipient = trimmedRecipient;
-    if (trimmedRecipient.startsWith('@')) {
+    if (!isEvmAddress(trimmedRecipient) && resolvedAddress) {
+      finalRecipient = resolvedAddress;
+    } else if (trimmedRecipient.startsWith('@')) {
+      // Fallback synchronous fetch just in case background task hasn't finished
       try {
         const res = await authFetch(`${API_BASE}/api/users/by-username/${trimmedRecipient}`);
         if (!res.ok) throw new Error();
@@ -338,9 +344,14 @@ export function SendModal({ onClose, onSent, isDemo, walletBalances, onDemoTrans
               id="amount-input"
               className="form-input"
               type="number"
+              min="0"
               placeholder="0.00"
               value={amount}
-              onChange={e => setAmount(e.target.value)}
+              onChange={e => {
+                const val = e.target.value;
+                if (val.includes('-')) return;
+                setAmount(val);
+              }}
               style={{ paddingRight: '100px' }}
             />
             <div style={{
