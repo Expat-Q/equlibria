@@ -61,6 +61,7 @@ function App() {
   const [walletBalances, setWalletBalances] = useState<WalletBalance[]>([]);
   const [balancesLoading, setBalancesLoading] = useState(false);
   const [recentActivity, setRecentActivity] = useState<RecentActivityItem[]>([]);
+  const [globalToast, setGlobalToast] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -763,16 +764,55 @@ function App() {
           onSent={(amount, recipient, txHash, chain, token) => {
             console.log(`Sent ${amount} to ${recipient}`);
             if (chain && token) {
+              let fiatEquivalent = amount;
+              const chainKey = chainIdMap[chain] ? chain : Object.keys(chainIdMap).find(k => chainIdMap[k] === Number(chain)) || chain;
+              if (walletBalances) {
+                const row = walletBalances.find(b => b.chain === chainKey && b.token === token);
+                if (row && row.balance > 0) {
+                  fiatEquivalent = amount * (row.usdValue / row.balance);
+                }
+              }
+
               addRecentActivity({
                 id: `send_${Date.now()}`,
                 name: `Send ${token} to ${recipient.slice(0, 6)}...${recipient.slice(-4)}`,
-                amount: -amount,
+                amount: -fiatEquivalent,
                 date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
                 icon: 'send',
                 txHash,
                 chainId: chainIdMap[chain],
                 chain,
               });
+
+              // POST activity to recipient natively!
+              authFetch(`${API_BASE}/api/activity/user`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userAddress: recipient,
+                  type: 'receive',
+                  name: `Received ${token} from ${address.slice(0, 6)}...${address.slice(-4)}`,
+                  amount: fiatEquivalent,
+                  txHash,
+                  chainId: chainIdMap[chain],
+                  chain,
+                  icon: 'download',
+                }),
+              }).catch(err => console.warn('Failed to notify recipient activity:', err));
+
+              // POST notification to recipient securely
+              authFetch(`${API_BASE}/api/notifications`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userAddress: recipient,
+                  type: 'success',
+                  message: `You received ${amount} ${token} on ${chain}!`,
+                }),
+              }).catch(err => console.warn('Failed to notify recipient notification:', err));
+
+              // Trigger Sleek Animation
+              setGlobalToast(`Successfully sent ${amount} ${token} to ${recipient.slice(0, 6)}...${recipient.slice(-4)}!`);
             }
           }}
           walletBalances={walletBalances}
@@ -792,6 +832,18 @@ function App() {
           onClose={() => setShowCryptoReceiveModal(false)}
           walletAddress={address}
           />
+      )}
+      {globalToast && (
+        <div className="global-toast fade-in-up">
+          <Icon name="check_circle" size={24} color="var(--success)" />
+          <div style={{ flex: 1 }}>
+            <h4>Transaction Successful</h4>
+            <p>{globalToast}</p>
+          </div>
+          <button onClick={() => setGlobalToast(null)}>
+            <Icon name="close" size={18} />
+          </button>
+        </div>
       )}
     </CurrencyProvider>
   );

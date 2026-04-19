@@ -1737,3 +1737,29 @@ input:checked + .slider:before {
 .btn-settings-card:hover {
   background: rgba(255, 255, 255, 0.3);
 }
+  
+/* 컴 Global Toast 컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴 */  
+.global-toast {  
+  position: fixed;  
+  bottom: 2rem;  
+  right: 2rem;  
+  background: var(--bg-card);  
+  border: 1px solid var(--border-subtle);  
+  border-radius: var(--radius-lg);  
+  padding: 1.25rem;  
+  box-shadow: var(--shadow-lg);  
+  display: flex;  
+  align-items: flex-start;  
+  gap: 1rem;  
+  z-index: 9999;  
+  max-width: 400px;  
+  animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;  
+}  
+@keyframes fadeInUp {  
+  from { opacity: 0; transform: translateY(20px); }  
+  to { opacity: 1; transform: translateY(0); }  
+}  
+.global-toast h4 { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.25rem; }  
+.global-toast p { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.4; }  
+.global-toast button { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 0.25rem; border-radius: var(--radius-sm); transition: all 0.2s ease; }  
+.global-toast button:hover { background: var(--bg-input); color: var(--text-primary); } 
